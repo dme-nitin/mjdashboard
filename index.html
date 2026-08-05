@@ -461,6 +461,9 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   <button class="nav-btn" id="amcCmcBtn" onclick="openAmcCmcApp()" title="Open AMC/CMC in a new tab">
     <span class="pd" style="background:#8B5CF6;"></span>AMC/CMC
   </button>
+  <button class="nav-btn" id="rsmReviewBtn" onclick="openRsmReviewDashboard()" title="Open RSM Review Dashboard in a new tab">
+    <span class="pd" style="background:#059669;"></span>RSM Review Dashboard
+  </button>
 </div>
 
 <div id="salesExecSection" style="display:none;">
@@ -3738,6 +3741,15 @@ function openAmcCmcApp() {
 }
 
 /* ══════════════════════════════════════════════════
+   RSM Review Dashboard button — another separate static site
+   (GitHub Pages), same simple pattern as Quotation Form/AMC/CMC:
+   opens directly in a new browser tab.
+══════════════════════════════════════════════════ */
+function openRsmReviewDashboard() {
+  window.open(RSM_REVIEW_DASHBOARD_URL, '_blank');
+}
+
+/* ══════════════════════════════════════════════════
    Prospective Customers list — fetch + render
    Data comes from getProspectiveCustomersList() (Report!BJ:BP),
    already returned in the requested display order (Hospital,
@@ -5457,6 +5469,8 @@ const DEPLOYED_URL = "https://script.google.com/macros/s/AKfycbx1eh9omJXRAr73b_O
 const QUOTATION_APP_URL = "https://dme-nitin.github.io/GlobalMedicareQuotation/";
 
 const AMC_CMC_URL = "https://dme-nitin.github.io/amc-cmc/";
+
+const RSM_REVIEW_DASHBOARD_URL = "https://dme-nitin.github.io/rsm-review-dashboard/";
 
 const IS_GAS = (typeof google !== 'undefined' && google.script && google.script.run);
 
