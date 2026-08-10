@@ -2533,8 +2533,7 @@ function getUniqueAddedThisWeek() {
    Powers the standalone "Unique Added This Month" button/page
    (next to the Sales Executive Reports filter bar) — a full
    list of unique-hospital-visit rows for the CURRENT MONTH,
-   grouped RSM-wise in the fixed hierarchy order, latest-first
-   within each RSM.
+   sorted by Date of Visit ASCENDING (oldest first, latest last).
 
    This is a SEPARATE function from getUniqueAddedThisMonth()
    above (which only returns per-email COUNTS, used for the
@@ -2549,22 +2548,24 @@ function getUniqueAddedThisWeek() {
      DF (col 110) = City
      DG (col 111) = Date of Visit
 
-   RSM lookup: the sheet has no RSM column here, so each row's
-   RSM Name is looked up from the SAME SALES_EXECUTIVES directory
-   used everywhere else in this file (matched by email,
-   case-insensitive) — no separate/duplicate mapping.
+   RSM + Name lookup: the sheet has no RSM/Name columns here, so
+   each row's RSM and Sales Executive NAME are both looked up
+   from the SAME SALES_EXECUTIVES directory used everywhere else
+   in this file (matched by email, case-insensitive) — no
+   separate/duplicate mapping. execId (the raw email) is still
+   included in the output for reference; execName is what the
+   frontend displays instead of the email.
 
    Logic:
    - Only rows where Date of Visit falls in the CURRENT calendar
      month (which, being "now", is always inside the current
      Financial Year too — no separate FY check needed).
    - Blank rows and invalid/unparseable dates are skipped.
-   - Sorted by RSM using RSM_HIERARCHY_ORDER (Vijay, Daya,
-     Abhishek Tiwari, Giridharan, Tanmoy — any RSM not in that
-     list sinks to the end), then by Date of Visit DESCENDING
-     within each RSM group.
+   - Sorted by Date of Visit ASCENDING (oldest → latest), on the
+     actual parsed Date object so this is correct regardless of
+     the sheet's date string format.
 
-   Returns: [ { date, hospital, city, execId, rsm }, ... ]
+   Returns: [ { date, hospital, city, execId, execName, rsm }, ... ]
 ══════════════════════════════════════════════════ */
 function getUniqueAddedThisMonthReport() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
@@ -2583,6 +2584,19 @@ function getUniqueAddedThisMonthReport() {
      logged the visit is no longer silently dropped). */
   var rsmByEmail = buildEmailToRsmLookup();
 
+  /* Email -> Name lookup, from the existing SALES_EXECUTIVES
+     directory — no new/duplicate mapping created. RSM_DIRECT_EMAILS
+     entries don't have a "name" (they're keyed straight to the RSM
+     name), so those fall back to using the RSM name itself. */
+  var nameByEmail = {};
+  SALES_EXECUTIVES.forEach(function(ex) {
+    var e = String(ex.email || "").trim().toLowerCase();
+    if (e) nameByEmail[e] = ex.name;
+  });
+  Object.keys(RSM_DIRECT_EMAILS).forEach(function(email) {
+    nameByEmail[email.trim().toLowerCase()] = RSM_DIRECT_EMAILS[email];
+  });
+
   /* DD=108, 4 cols through DG=111 */
   var data = rep.getRange(2, 108, lastRow - 1, 4).getValues();
   var rows = [];
@@ -2599,27 +2613,26 @@ function getUniqueAddedThisMonthReport() {
     if (!visitDate) return; /* ignore invalid/unparseable dates */
     if (visitDate.getMonth() !== curMonth || visitDate.getFullYear() !== curYear) return; /* current month only */
 
-    var rsm = rsmByEmail[execId.toLowerCase()] || "Unassigned";
+    var execIdLower = execId.toLowerCase();
+    var rsm      = rsmByEmail[execIdLower] || "Unassigned";
+    var execName = nameByEmail[execIdLower] || execId; /* fall back to the raw ID if no name is mapped */
 
     rows.push({
       date     : visitDate.toISOString(),
       hospital : hospital,
       city     : city,
       execId   : execId,
+      execName : execName,
       rsm      : rsm
     });
   });
 
-  /* RSM-wise custom order (from the existing RSM_HIERARCHY_ORDER),
-     then Date of Visit descending within each RSM group. */
-  function rsmRank(rsm) {
-    var idx = RSM_HIERARCHY_ORDER.indexOf(rsm);
-    return idx === -1 ? RSM_HIERARCHY_ORDER.length : idx;
-  }
+  /* Sort by Date of Visit ASCENDING — oldest entry first, latest
+     last. Replaces the previous RSM-hierarchy grouping. Sorting
+     on the actual parsed Date object (not the raw sheet string),
+     so this is correct regardless of the sheet's date format. */
   rows.sort(function(a, b) {
-    var rankDiff = rsmRank(a.rsm) - rsmRank(b.rsm);
-    if (rankDiff !== 0) return rankDiff;
-    return new Date(b.date) - new Date(a.date); /* latest first */
+    return new Date(a.date) - new Date(b.date);
   });
 
   return rows;
