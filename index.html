@@ -3629,15 +3629,16 @@ function renderUniqueAddedMonthTable() {
     rows = rows.filter(function(r) {
       return (r.hospital || '').toLowerCase().indexOf(searchTerm) !== -1 ||
              (r.city || '').toLowerCase().indexOf(searchTerm) !== -1 ||
-             (r.execId || '').toLowerCase().indexOf(searchTerm) !== -1 ||
+             (r.execName || r.execId || '').toLowerCase().indexOf(searchTerm) !== -1 ||
              (r.rsm || '').toLowerCase().indexOf(searchTerm) !== -1;
     });
   }
 
-  /* Column-header click sort OVERRIDES the default RSM-grouped
-     order (only while a sort field is active); clearing the
-     search/reselecting doesn't restore default order on its own
-     — that's what the "RSM" header's default state represents. */
+  /* Default order (no column-header sort active) is ASCENDING by
+     Date of Visit — oldest first, latest last — computed
+     server-side in getUniqueAddedThisMonthReport(). Clicking a
+     column header below overrides this with that column's sort
+     until a different header is clicked or the field is cleared. */
   if (uaMonthSortState.field) {
     const f = uaMonthSortState.field, dir = uaMonthSortState.dir;
     rows.sort(function(a, b) {
@@ -3683,7 +3684,7 @@ function renderUniqueAddedMonthTable() {
       '<td style="white-space:nowrap;">' + fmtDate(r.date) + '</td>' +
       '<td style="font-weight:500;">' + (r.hospital || '—') + '</td>' +
       '<td>' + (r.city || '—') + '</td>' +
-      '<td>' + (r.execId || '—') + '</td>' +
+      '<td>' + (r.execName || r.execId || '—') + '</td>' +
       '<td>' + (r.rsm || '—') + '</td>' +
     '</tr>';
   }).join('');
@@ -3695,7 +3696,7 @@ function renderUniqueAddedMonthTable() {
         sortableHeader('date', 'Date of Visit') +
         sortableHeader('hospital', 'Hospital Name') +
         sortableHeader('city', 'City') +
-        sortableHeader('execId', 'Sales Executive ID') +
+        sortableHeader('execName', 'Sales Executive ID') +
         sortableHeader('rsm', 'RSM Name') +
       '</tr></thead>' +
       '<tbody>' + bodyRows + '</tbody>' +
