@@ -235,6 +235,14 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(bankData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Payment Summary (Kamaljeet/Varsha) — used by the frontend's JSONP
+     fallback path. ── */
+  if (section === "paymentSummaryByEmployee") {
+    var psData = getPaymentSummaryByEmployee();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(psData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(psData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Expected Payment Receive This Week — used by the frontend's JSONP
      fallback path. Same data as getWeeklyPayments(), just JSONP-wrapped. ── */
   if (section === "weeklyPayments") {
@@ -758,6 +766,126 @@ function getCurrentBankData() {
    used elsewhere in this file, so it correctly handles both
    real Date cells and DD/MM/YYYY text values.
 ══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   getPaymentSummaryByEmployee()
+   Powers the "Payment Summary" panel shown ABOVE "Expected
+   Payment Receive This Week" in the Accounts section —
+   Kamaljeet / Varsha payment totals across 4 live date windows.
+
+   Source: Report!FX:GD (7-col block, FX = col 180)
+     FX (col 180) = (unused here)
+     FY (col 181) = (unused here)
+     FZ (col 182) = (unused here)
+     GA (col 183) = (unused here)
+     GB (col 184) = PAYMENT RECEIVED AMOUNT  ← summed
+     GC (col 185) = PAYMENT RECEIVED DATE    ← filter column
+     GD (col 186) = VARSHA / KAMALJEET       ← employee grouping
+
+   4 date windows (all computed fresh from the server's current
+   date on every call — nothing hardcoded, nothing cached across
+   days):
+     1. THIS WEEK        : Monday of the current week → TODAY
+                            (not the full week — only up to today,
+                            per the requirement's own example).
+     2. TO BE RECEIVED THIS WEEK : identical value to #1 (by
+                            design, per the requirement).
+     3. LAST WEEK         : the previous FULLY COMPLETED week,
+                            Monday → Saturday (7 days before this
+                            week's Monday through the day before
+                            this week's Monday).
+     4. THIS MONTH        : 1st of the current calendar month →
+                            TODAY.
+
+   GC is parsed via parseSheetTimestamp() (a real Date object),
+   never compared as text/string, so this is correct regardless
+   of the sheet's date display format.
+
+   Returns:
+     {
+       employeeOrder: ["Kamaljeet","Varsha"],
+       employees: {
+         "Kamaljeet": { thisWeek, toBeReceivedThisWeek, lastWeek, thisMonth },
+         "Varsha"   : { ... }
+       },
+       total: { thisWeek, toBeReceivedThisWeek, lastWeek, thisMonth }
+     }
+══════════════════════════════════════════════════ */
+function getPaymentSummaryByEmployee() {
+  var EMP_ORDER = ["Kamaljeet", "Varsha"];
+  var empty = { employeeOrder: EMP_ORDER, employees: {}, total: { thisWeek: 0, toBeReceivedThisWeek: 0, lastWeek: 0, thisMonth: 0 } };
+  EMP_ORDER.forEach(function(e) { empty.employees[e] = { thisWeek: 0, toBeReceivedThisWeek: 0, lastWeek: 0, thisMonth: 0 }; });
+
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) return empty;
+
+  var lastRow = rep.getLastRow();
+  if (lastRow < 2) return empty;
+
+  var today    = new Date();
+  var todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+  /* This week = Monday (shared dashboard-wide current-week
+     definition) → TODAY (not the full week). */
+  var currentWeek   = getCurrentWeekMonToSat();
+  var thisWeekStart = currentWeek.start;
+
+  /* Last week = the previous FULLY COMPLETED Mon→Sat week. */
+  var lastWeekStart = new Date(thisWeekStart.getFullYear(), thisWeekStart.getMonth(), thisWeekStart.getDate() - 7);
+  lastWeekStart.setHours(0, 0, 0, 0);
+  var lastWeekEnd = new Date(lastWeekStart.getFullYear(), lastWeekStart.getMonth(), lastWeekStart.getDate() + 5, 23, 59, 59, 999);
+
+  /* This month = 1st of current month → TODAY. */
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
+
+  /* FX=180, 7 cols through GD=186 */
+  var data = rep.getRange(2, 180, lastRow - 1, 7).getValues();
+
+  var sums = {};
+  EMP_ORDER.forEach(function(e) { sums[e] = { thisWeek: 0, lastWeek: 0, thisMonth: 0 }; });
+
+  data.forEach(function(r) {
+    var amountRaw = r[4]; /* GB */
+    var dateRaw   = r[5]; /* GC */
+    var empRaw    = String(r[6] || "").trim(); /* GD */
+
+    if (!empRaw) return;
+    var emp = EMP_ORDER.filter(function(e) { return e.toLowerCase() === empRaw.toLowerCase(); })[0];
+    if (!emp) return; /* name in sheet doesn't match Kamaljeet/Varsha — skip */
+
+    var d = parseSheetTimestamp(dateRaw); /* real Date object, never text-compared */
+    if (!d) return;
+
+    var amount = typeof amountRaw === "number" ? amountRaw
+                 : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) return;
+
+    if (d >= thisWeekStart && d <= todayEnd)      sums[emp].thisWeek  += amount;
+    if (d >= lastWeekStart && d <= lastWeekEnd)   sums[emp].lastWeek  += amount;
+    if (d >= monthStart && d <= todayEnd)         sums[emp].thisMonth += amount;
+  });
+
+  var employees = {};
+  var total = { thisWeek: 0, toBeReceivedThisWeek: 0, lastWeek: 0, thisMonth: 0 };
+  EMP_ORDER.forEach(function(e) {
+    var thisWeek  = Math.round(sums[e].thisWeek);
+    var lastWeek  = Math.round(sums[e].lastWeek);
+    var thisMonth = Math.round(sums[e].thisMonth);
+    employees[e] = {
+      thisWeek             : thisWeek,
+      toBeReceivedThisWeek : thisWeek, /* identical value, per requirement */
+      lastWeek             : lastWeek,
+      thisMonth            : thisMonth
+    };
+    total.thisWeek             += thisWeek;
+    total.toBeReceivedThisWeek += thisWeek;
+    total.lastWeek             += lastWeek;
+    total.thisMonth            += thisMonth;
+  });
+
+  return { employeeOrder: EMP_ORDER, employees: employees, total: total };
+}
+
 function getWeeklyPayments() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
@@ -4432,4 +4560,210 @@ function debugInventoryColumns() {
       " | background=" + backgrounds[i][0]
     );
   }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   DAILY EXPECTED-PAYMENT PDF EMAIL AUTOMATION
+   ----------------------------------------------------------------------
+   Purpose: Every morning (9–10 AM window via a time-driven trigger),
+   e-mail two PDF reports — one for Kamaljeet, one for Varsha — built
+   from the SAME live data that powers the dashboard's
+   "Expected Payment Receive This Week" table.
+
+   Data source: reuses getWeeklyPayments() (Report!DP:DW, current
+   Mon→Sat week, filtered by Expected Payment Date). Nothing hardcoded —
+   the current week is recomputed on every run.
+
+   This block is fully self-contained. It does NOT touch the dashboard
+   UI, the Accounts section, or any existing function. To activate the
+   daily schedule, run installDailyExpectedPaymentTrigger() ONCE.
+   ══════════════════════════════════════════════════════════════════════ */
+
+var EXPECTED_PAYMENT_REPORT_RECIPIENT = "info@globalmedicare.co.in";
+
+/* One-time setup — run this ONCE from the Apps Script editor.
+   Creates time-driven triggers that fire MONDAY through SATURDAY
+   (Sunday skipped), each in the 9–10 AM window (Apps Script cannot
+   guarantee the exact minute). Safe to re-run: it removes any existing
+   trigger for this handler first so you never end up with duplicates. */
+function installDailyExpectedPaymentTrigger() {
+  var HANDLER = "sendDailyExpectedPaymentReport";
+
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === HANDLER) ScriptApp.deleteTrigger(t);
+  });
+
+  var days = [
+    ScriptApp.WeekDay.MONDAY,
+    ScriptApp.WeekDay.TUESDAY,
+    ScriptApp.WeekDay.WEDNESDAY,
+    ScriptApp.WeekDay.THURSDAY,
+    ScriptApp.WeekDay.FRIDAY,
+    ScriptApp.WeekDay.SATURDAY
+  ];
+
+  days.forEach(function (d) {
+    ScriptApp.newTrigger(HANDLER)
+      .timeBased()
+      .onWeekDay(d)
+      .atHour(9)          // 9–10 AM window
+      .create();
+  });
+
+  Logger.log("Trigger installed for " + HANDLER + " — fires Mon–Sat, 9–10 AM (Sunday skipped).");
+}
+
+/* Optional helper — removes the daily trigger if you ever want to stop
+   the automated emails. */
+function removeDailyExpectedPaymentTrigger() {
+  var HANDLER = "sendDailyExpectedPaymentReport";
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === HANDLER) { ScriptApp.deleteTrigger(t); removed++; }
+  });
+  Logger.log("Removed " + removed + " trigger(s) for " + HANDLER + ".");
+}
+
+/* Main entry point — called by the daily trigger (or run manually to
+   test). Fetches the live weekly data, splits it by person, builds two
+   PDFs, and emails both as attachments in a single message. */
+function sendDailyExpectedPaymentReport() {
+  var payload = getWeeklyPayments();            // live, reused source
+  var rows    = (payload && payload.rows) ? payload.rows : [];
+  var weekStart = payload ? payload.weekStart : "";
+  var weekEnd   = payload ? payload.weekEnd   : "";
+
+  // Split by the VARSHA / KAMALJEET column (row.person). Matching is
+  // case-insensitive and tolerant of extra spaces.
+  var kamaljeetRows = rows.filter(function (r) { return _matchesPerson(r.person, "Kamaljeet"); });
+  var varshaRows    = rows.filter(function (r) { return _matchesPerson(r.person, "Varsha"); });
+
+  var kamaljeetPdf = _buildExpectedPaymentPdf("Kamaljeet", kamaljeetRows, weekStart, weekEnd)
+    .setName("Expected_Payment_This_Week_Kamaljeet.pdf");
+  var varshaPdf = _buildExpectedPaymentPdf("Varsha", varshaRows, weekStart, weekEnd)
+    .setName("Expected_Payment_This_Week_Varsha.pdf");
+
+  MailApp.sendEmail({
+    to:      EXPECTED_PAYMENT_REPORT_RECIPIENT,
+    subject: "Expected Payment Receive This Week — Daily Report",
+    body:    "Please find attached the daily Expected Payment Receive This Week reports for Kamaljeet and Varsha.",
+    attachments: [kamaljeetPdf, varshaPdf]
+  });
+
+  Logger.log("Daily Expected Payment report sent to " + EXPECTED_PAYMENT_REPORT_RECIPIENT +
+             " (Kamaljeet: " + kamaljeetRows.length + " rows, Varsha: " + varshaRows.length + " rows).");
+}
+
+/* Case-insensitive, space-tolerant person match. */
+function _matchesPerson(value, name) {
+  return String(value || "").trim().toLowerCase() === String(name).trim().toLowerCase();
+}
+
+/* Indian-format currency, e.g. 3583870 -> "₹35,83,870". Mirrors the
+   dashboard's fmtRupee() behaviour (en-IN grouping, no decimals). */
+function _fmtRupeeServer(n) {
+  n = Number(n) || 0;
+  var neg = n < 0;
+  n = Math.round(Math.abs(n)).toString();
+  var last3 = n.length > 3 ? n.slice(-3) : n;
+  var other = n.length > 3 ? n.slice(0, -3) : "";
+  if (other) last3 = "," + last3;
+  other = other.replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+  return "₹" + (neg ? "-" : "") + other + last3;
+}
+
+/* dd MMM yyyy, or "—" when missing/invalid. */
+function _fmtDateServer(iso) {
+  if (!iso) return "—";
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  var tz = Session.getScriptTimeZone() || "Asia/Kolkata";
+  return Utilities.formatDate(d, tz, "dd MMM yyyy");
+}
+
+/* HTML-escape helper for safe cell content. */
+function _esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/* Builds a single person's PDF blob. Uses an HTML → PDF conversion so
+   the table keeps a clean, professional look close to the dashboard. */
+function _buildExpectedPaymentPdf(personName, rows, weekStartIso, weekEndIso) {
+  var tz = Session.getScriptTimeZone() || "Asia/Kolkata";
+  var generatedOn = Utilities.formatDate(new Date(), tz, "dd MMM yyyy, hh:mm a");
+  var weekLabel = (weekStartIso && weekEndIso)
+    ? (_fmtDateServer(weekStartIso) + " – " + _fmtDateServer(weekEndIso))
+    : "Current week";
+
+  var totalAmount = rows.reduce(function (s, r) { return s + (Number(r.amount) || 0); }, 0);
+
+  var bodyRows = rows.map(function (r) {
+    return '<tr>' +
+      '<td>' + _esc(_fmtDateServer(r.billDate)) + '</td>' +
+      '<td class="name">' + _esc(r.customer || "—") + '</td>' +
+      '<td>' + _esc(r.state || "—") + '</td>' +
+      '<td>' + _esc(r.model || "—") + '</td>' +
+      '<td class="num">' + _esc(r.qty || 0) + '</td>' +
+      '<td class="amt">' + _esc(_fmtRupeeServer(r.amount)) + '</td>' +
+      '<td>' + _esc(r.person || "—") + '</td>' +
+    '</tr>';
+  }).join("");
+
+  if (!rows.length) {
+    bodyRows = '<tr><td colspan="7" class="empty">No payments expected this week for ' +
+      _esc(personName) + '.</td></tr>';
+  }
+
+  var html =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' +
+  '  * { box-sizing: border-box; }' +
+  '  body { font-family: Arial, Helvetica, sans-serif; color: #1e293b; margin: 28px; }' +
+  '  .hdr { border-bottom: 3px solid #2c7be5; padding-bottom: 12px; margin-bottom: 18px; }' +
+  '  .company { font-size: 18px; font-weight: 700; color: #0f172a; }' +
+  '  .title { font-size: 15px; font-weight: 600; color: #2c7be5; margin-top: 4px; }' +
+  '  .meta { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.5; }' +
+  '  .meta b { color: #334155; }' +
+  '  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 11px; }' +
+  '  thead th { background: #2c7be5; color: #fff; text-align: left; padding: 8px 9px; font-size: 10.5px; ' +
+  '             text-transform: uppercase; letter-spacing: .3px; }' +
+  '  tbody td { padding: 7px 9px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }' +
+  '  tbody tr:nth-child(even) td { background: #f8fafc; }' +
+  '  td.name { font-weight: 600; }' +
+  '  td.num { text-align: right; }' +
+  '  td.amt { text-align: right; font-weight: 700; color: #2c7be5; white-space: nowrap; }' +
+  '  td.empty { text-align: center; color: #64748b; padding: 22px 0; font-style: italic; }' +
+  '  tfoot td { padding: 9px; font-weight: 700; border-top: 2px solid #2c7be5; }' +
+  '  tfoot .amt { text-align: right; color: #2c7be5; white-space: nowrap; }' +
+  '  .footnote { margin-top: 16px; font-size: 9.5px; color: #94a3b8; }' +
+  '</style></head><body>' +
+  '  <div class="hdr">' +
+  '    <div class="company">Global Medicare</div>' +
+  '    <div class="title">Expected Payment Receive This Week — ' + _esc(personName) + '</div>' +
+  '    <div class="meta">' +
+  '      <b>Week:</b> ' + _esc(weekLabel) + '<br>' +
+  '      <b>Generated:</b> ' + _esc(generatedOn) +
+  '    </div>' +
+  '  </div>' +
+  '  <table>' +
+  '    <thead><tr>' +
+  '      <th>Bill Date</th><th>Customer Name</th><th>State</th><th>Model</th>' +
+  '      <th style="text-align:right">Qty</th><th style="text-align:right">Amount</th>' +
+  '      <th>Varsha / Kamaljeet</th>' +
+  '    </tr></thead>' +
+  '    <tbody>' + bodyRows + '</tbody>' +
+  (rows.length ?
+  '    <tfoot><tr>' +
+  '      <td colspan="5">Total</td>' +
+  '      <td class="amt">' + _esc(_fmtRupeeServer(totalAmount)) + '</td>' +
+  '      <td></td>' +
+  '    </tr></tfoot>' : '') +
+  '  </table>' +
+  '  <div class="footnote">Auto-generated from the Global Medicare dashboard · Source: Report!DP:DW (filtered by Expected Payment Date).</div>' +
+  '</body></html>';
+
+  var htmlBlob = Utilities.newBlob(html, "text/html", "report.html");
+  return htmlBlob.getAs("application/pdf");
 }
