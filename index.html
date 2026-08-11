@@ -573,6 +573,14 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   </div>
 
   <div class="panel" style="margin-top:16px;">
+    <div class="sec-h">Payment Summary</div>
+    <div class="sec-sub" id="paymentSummaryRange" style="margin:-10px 0 14px;display:none;">Source: Report!FX:GD (GB amount · GC date · GD employee)</div>
+    <div id="paymentSummaryTbl">
+      <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
     <div class="sec-h">Expected Payment Receive This Week</div>
     <div class="sec-sub" id="weeklyPaymentsRange" style="margin:-10px 0 14px;display:none;">Source: Report!DP:DW (filtered by Expected Payment Date, DW)</div>
     <div id="weeklyPaymentsTbl">
@@ -3237,6 +3245,7 @@ function render(RS, LD) {
 ══════════════════════════════════════════════════ */
 let accountsSectionOpen     = false;
 let accountsDataLoaded      = false;
+let paymentSummaryLoaded    = false;
 let weeklyPaymentsLoaded    = false;
 let monthlyPaymentsLoaded   = false;
 let overdueInvoicesLoaded   = false;
@@ -3397,6 +3406,7 @@ function toggleAccountsSection() {
     mainView.style.display = 'none';
     acctSec.style.display  = 'block';
     if (!accountsDataLoaded) fetchCurrentBankData();
+    if (!paymentSummaryLoaded) fetchPaymentSummary();
     if (!weeklyPaymentsLoaded) fetchWeeklyPayments();
     if (!monthlyPaymentsLoaded) fetchMonthlyPayments();
     if (!overdueInvoicesLoaded) fetchOverdueInvoices();
@@ -4370,6 +4380,106 @@ function renderCurrentBankData(data) {
       '<span style="font-size:11px;color:rgba(255,255,255,.8);margin-left:32px;">(Axis+SBM)</span>' +
     '</div>' +
     '<span style="font-size:23px;color:#FFFFFF;font-weight:700;font-family:\'IBM Plex Mono\',monospace;">' + fmtRupee(amount) + '</span>';
+}
+
+/* ══════════════════════════════════════════════════
+   Payment Summary (Kamaljeet / Varsha) — fetch + render
+   Data comes from getPaymentSummaryByEmployee() (Report!FX:GD):
+   GB = amount summed, GC = received date, GD = employee. All
+   four windows (this week Mon→today, to-be-received = this week,
+   last completed Mon→Sat week, this month 1st→today) are computed
+   live server-side from the current date — nothing hardcoded.
+══════════════════════════════════════════════════ */
+function fetchPaymentSummary() {
+  const el = document.getElementById('paymentSummaryTbl');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>';
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(function(data) { paymentSummaryLoaded = true; renderPaymentSummary(data); })
+      .withFailureHandler(function(err) {
+        console.error('[GM] getPaymentSummaryByEmployee error:', err);
+        if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Could not load: ' + (err.message || err) + '</div>';
+      })
+      .getPaymentSummaryByEmployee();
+  } else {
+    const old = document.getElementById('__gm_ps_j');
+    if (old) old.remove();
+    const cb = '__gmpscb' + Date.now();
+    window[cb] = function(data) { cleanup(); paymentSummaryLoaded = true; renderPaymentSummary(data); };
+    const timer = setTimeout(function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Timeout loading data.</div>';
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      const s = document.getElementById('__gm_ps_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    const s = document.createElement('script');
+    s.id  = '__gm_ps_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=paymentSummaryByEmployee&_=' + Date.now();
+    s.onerror = function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Network error loading data.</div>';
+    };
+    document.head.appendChild(s);
+  }
+}
+
+function renderPaymentSummary(data) {
+  const el = document.getElementById('paymentSummaryTbl');
+  if (!el) return;
+
+  const rangeEl = document.getElementById('paymentSummaryRange');
+  if (rangeEl) rangeEl.style.display = 'block';
+
+  const order = (data && Array.isArray(data.employeeOrder) && data.employeeOrder.length)
+    ? data.employeeOrder : ['Kamaljeet', 'Varsha'];
+  const emps  = (data && data.employees) ? data.employees : {};
+  const total = (data && data.total) ? data.total
+    : { thisWeek:0, toBeReceivedThisWeek:0, lastWeek:0, thisMonth:0 };
+
+  function cell(v) {
+    return '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:600;color:var(--primary);">' + fmtRupee(v) + '</td>';
+  }
+
+  const body = order.map(function(name) {
+    const e = emps[name] || { thisWeek:0, toBeReceivedThisWeek:0, lastWeek:0, thisMonth:0 };
+    return '<tr>' +
+      '<td style="font-weight:600;">' + name + '</td>' +
+      cell(e.thisWeek) +
+      cell(e.toBeReceivedThisWeek) +
+      cell(e.lastWeek) +
+      cell(e.thisMonth) +
+    '</tr>';
+  }).join('');
+
+  function tcell(v) {
+    return '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(v) + '</td>';
+  }
+
+  el.innerHTML =
+    '<div style="overflow-x:auto;">' +
+    '<table>' +
+      '<thead><tr>' +
+        '<th>Name</th>' +
+        '<th style="text-align:center">Payment received this week</th>' +
+        '<th style="text-align:center">Payment to be received this week</th>' +
+        '<th style="text-align:center">Payment received last week</th>' +
+        '<th style="text-align:center">Payment received this month</th>' +
+      '</tr></thead>' +
+      '<tbody>' + body + '</tbody>' +
+      '<tfoot><tr>' +
+        '<td><b>Total</b></td>' +
+        tcell(total.thisWeek) +
+        tcell(total.toBeReceivedThisWeek) +
+        tcell(total.lastWeek) +
+        tcell(total.thisMonth) +
+      '</tr></tfoot>' +
+    '</table>' +
+    '</div>';
 }
 
 /* ══════════════════════════════════════════════════
@@ -5638,6 +5748,7 @@ function doRefresh() {
 ══════════════════════════════════════════════════ */
 registerRefreshHook(function refreshAccountsDataOnDemand() {
   accountsDataLoaded      = false;
+  paymentSummaryLoaded    = false;
   weeklyPaymentsLoaded    = false;
   monthlyPaymentsLoaded   = false;
   overdueInvoicesLoaded   = false;
@@ -5648,6 +5759,7 @@ registerRefreshHook(function refreshAccountsDataOnDemand() {
 
   if (accountsSectionOpen) {
     fetchCurrentBankData();
+    fetchPaymentSummary();
     fetchWeeklyPayments();
     fetchMonthlyPayments();
     fetchOverdueInvoices();
