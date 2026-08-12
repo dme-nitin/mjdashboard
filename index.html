@@ -589,6 +589,22 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   </div>
 
   <div class="panel" style="margin-top:16px;">
+    <div class="sec-h">Total Amount Receive This Month</div>
+    <div class="sec-sub" id="totalAmtReceivedRange" style="margin:-10px 0 14px;display:none;">Source: Report!FX:GD (filtered by Payment Received Date, GC)</div>
+    <div id="totalAmtReceivedTbl">
+      <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h">Accounts Receivable</div>
+    <div class="sec-sub" style="margin:-10px 0 14px;display:none;">Source: Report!GF:GK</div>
+    <div id="accountsReceivableTbl">
+      <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
     <div class="sec-h">Expected Payment Receive This Month</div>
     <div class="sec-sub" id="monthlyPaymentsRange" style="margin:-10px 0 14px;display:none;">Source: Report!DP:DW (filtered by Expected Payment Date, DW)</div>
     <div id="monthlyPaymentsTbl">
@@ -3248,6 +3264,8 @@ let accountsDataLoaded      = false;
 let paymentSummaryLoaded    = false;
 let weeklyPaymentsLoaded    = false;
 let monthlyPaymentsLoaded   = false;
+let totalAmtReceivedLoaded  = false;
+let accountsReceivableLoaded = false;
 let overdueInvoicesLoaded   = false;
 let overdue6PlusLoaded      = false;
 let overBudgetLoaded        = false;
@@ -3408,6 +3426,8 @@ function toggleAccountsSection() {
     if (!accountsDataLoaded) fetchCurrentBankData();
     if (!paymentSummaryLoaded) fetchPaymentSummary();
     if (!weeklyPaymentsLoaded) fetchWeeklyPayments();
+    if (!totalAmtReceivedLoaded) fetchTotalAmountReceivedThisMonth();
+    if (!accountsReceivableLoaded) fetchAccountsReceivable();
     if (!monthlyPaymentsLoaded) fetchMonthlyPayments();
     if (!overdueInvoicesLoaded) fetchOverdueInvoices();
     if (!overdue6PlusLoaded) fetchOverdue6Plus();
@@ -4585,6 +4605,199 @@ function renderWeeklyPayments(data) {
 }
 
 /* ══════════════════════════════════════════════════
+   Total Amount Receive This Month — fetch + render
+   Data comes from getTotalAmountReceivedThisMonth() (Report!
+   FX:GD), already filtered server-side to the current calendar
+   month based on the Payment Received Date (GC) column — 1st of
+   the month through today, moving forward automatically as the
+   date/month changes. Independent of, and does not touch, the
+   Payment Summary panel's logic (same FX:GD range, separate
+   read/purpose).
+══════════════════════════════════════════════════ */
+function fetchTotalAmountReceivedThisMonth() {
+  const el = document.getElementById('totalAmtReceivedTbl');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>';
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(function(data) { totalAmtReceivedLoaded = true; renderTotalAmountReceivedThisMonth(data); })
+      .withFailureHandler(function(err) {
+        console.error('[GM] getTotalAmountReceivedThisMonth error:', err);
+        if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Could not load: ' + (err.message || err) + '</div>';
+      })
+      .getTotalAmountReceivedThisMonth();
+  } else {
+    /* JSONP fallback — same pattern used elsewhere in this file */
+    const old = document.getElementById('__gm_tar_j');
+    if (old) old.remove();
+    const cb = '__gmtarcb' + Date.now();
+    window[cb] = function(data) { cleanup(); totalAmtReceivedLoaded = true; renderTotalAmountReceivedThisMonth(data); };
+    const timer = setTimeout(function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Timeout loading data.</div>';
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      const s = document.getElementById('__gm_tar_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    const s = document.createElement('script');
+    s.id  = '__gm_tar_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=totalAmountReceivedThisMonth&_=' + Date.now();
+    s.onerror = function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Network error loading data.</div>';
+    };
+    document.head.appendChild(s);
+  }
+}
+
+function renderTotalAmountReceivedThisMonth(data) {
+  const el = document.getElementById('totalAmtReceivedTbl');
+  if (!el) return;
+
+  const rangeEl = document.getElementById('totalAmtReceivedRange');
+  if (rangeEl && data && data.monthStart) {
+    const monthLabel = new Date(data.monthStart).toLocaleDateString('en-GB', {month:'long', year:'numeric'});
+    rangeEl.textContent = 'Month: ' + monthLabel +
+      ' · Source: Report!FX:GD (filtered by Payment Received Date, GC)';
+  }
+
+  const rows = (data && Array.isArray(data.rows)) ? data.rows : [];
+  if (!rows.length) {
+    el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No payments received this month.</div>';
+    return;
+  }
+
+  const totalAmount = (typeof data.total === 'number') ? data.total
+    : rows.reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+
+  let body = rows.map(function(r) {
+    return '<tr>' +
+      '<td>' + fmtShortDate(r.billDate) + '</td>' +
+      '<td style="font-weight:500;">' + (r.customer || '—') + '</td>' +
+      '<td>' + (r.state || '—') + '</td>' +
+      '<td>' + (r.model || '—') + '</td>' +
+      '<td style="text-align:right;min-width:130px;padding-right:32px;font-family:\'IBM Plex Mono\',monospace;font-weight:600;color:var(--primary);white-space:nowrap;">' + fmtRupee(r.amount) + '</td>' +
+      '<td style="min-width:110px;padding-left:32px;white-space:nowrap;">' + fmtShortDate(r.receivedDate) + '</td>' +
+      '<td>' + (r.person || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table>' +
+      '<thead><tr>' +
+        '<th>Bill Date</th>' +
+        '<th>Customer</th>' +
+        '<th>State</th>' +
+        '<th>Model</th>' +
+        '<th style="text-align:right;min-width:130px;padding-right:32px;white-space:normal;line-height:1.4;">Payment Received<br>Amount</th>' +
+        '<th style="min-width:110px;padding-left:32px;white-space:normal;line-height:1.4;">Payment Receive<br>Date</th>' +
+        '<th>Varsha / Kamaljeet</th>' +
+      '</tr></thead>' +
+      '<tbody>' + body + '</tbody>' +
+      '<tfoot><tr>' +
+        '<td colspan="4"><b>Total</b></td>' +
+        '<td style="text-align:right;min-width:130px;padding-right:32px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);white-space:nowrap;">' + fmtRupee(totalAmount) + '</td>' +
+        '<td></td>' +
+        '<td></td>' +
+      '</tr></tfoot>' +
+    '</table>';
+}
+
+/* ══════════════════════════════════════════════════
+   Accounts Receivable — fetch + render
+   Data comes from getAccountsReceivable() (Report!GF:GK) — no
+   date filter, every row with a Customer name is shown live from
+   the sheet. Same panel style/column-spacing pattern as "Total
+   Amount Receive This Month" directly above it (Balance
+   right-aligned with generous padding, kept clearly separate
+   from the Varsha/Kamaljeet column next to it).
+══════════════════════════════════════════════════ */
+function fetchAccountsReceivable() {
+  const el = document.getElementById('accountsReceivableTbl');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>';
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(function(data) { accountsReceivableLoaded = true; renderAccountsReceivable(data); })
+      .withFailureHandler(function(err) {
+        console.error('[GM] getAccountsReceivable error:', err);
+        if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Could not load: ' + (err.message || err) + '</div>';
+      })
+      .getAccountsReceivable();
+  } else {
+    /* JSONP fallback — same pattern used elsewhere in this file */
+    const old = document.getElementById('__gm_ar_j');
+    if (old) old.remove();
+    const cb = '__gmarcb' + Date.now();
+    window[cb] = function(data) { cleanup(); accountsReceivableLoaded = true; renderAccountsReceivable(data); };
+    const timer = setTimeout(function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Timeout loading data.</div>';
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      const s = document.getElementById('__gm_ar_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    const s = document.createElement('script');
+    s.id  = '__gm_ar_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=accountsReceivable&_=' + Date.now();
+    s.onerror = function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Network error loading data.</div>';
+    };
+    document.head.appendChild(s);
+  }
+}
+
+function renderAccountsReceivable(data) {
+  const el = document.getElementById('accountsReceivableTbl');
+  if (!el) return;
+
+  const rows = (data && Array.isArray(data.rows)) ? data.rows : [];
+  if (!rows.length) {
+    el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No accounts receivable records found.</div>';
+    return;
+  }
+
+  const totalBalance = (typeof data.total === 'number') ? data.total
+    : rows.reduce(function(s, r) { return s + (Number(r.balance) || 0); }, 0);
+
+  let body = rows.map(function(r) {
+    return '<tr>' +
+      '<td>' + fmtShortDate(r.billDate) + '</td>' +
+      '<td style="font-weight:500;">' + (r.customer || '—') + '</td>' +
+      '<td>' + (r.state || '—') + '</td>' +
+      '<td>' + (r.model || '—') + '</td>' +
+      '<td style="text-align:right;min-width:130px;padding-right:32px;font-family:\'IBM Plex Mono\',monospace;font-weight:600;color:var(--primary);white-space:nowrap;">' + fmtRupee(r.balance) + '</td>' +
+      '<td>' + (r.person || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table>' +
+      '<thead><tr>' +
+        '<th>Bill Date</th>' +
+        '<th>Customer</th>' +
+        '<th>State</th>' +
+        '<th>Model</th>' +
+        '<th style="text-align:right;min-width:130px;padding-right:32px;">Balance</th>' +
+        '<th style="padding-left:22px;">Varsha / Kamaljeet</th>' +
+      '</tr></thead>' +
+      '<tbody>' + body + '</tbody>' +
+      '<tfoot><tr>' +
+        '<td colspan="4"><b>Total</b></td>' +
+        '<td style="text-align:right;min-width:130px;padding-right:32px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);white-space:nowrap;">' + fmtRupee(totalBalance) + '</td>' +
+        '<td></td>' +
+      '</tr></tfoot>' +
+    '</table>';
+}
+
+/* ══════════════════════════════════════════════════
    Expected Payment Receive This Month — fetch + render
    Data comes from getMonthlyPayments() (Report!DP:DW), already
    filtered server-side to the current calendar month based on
@@ -5750,6 +5963,8 @@ registerRefreshHook(function refreshAccountsDataOnDemand() {
   accountsDataLoaded      = false;
   paymentSummaryLoaded    = false;
   weeklyPaymentsLoaded    = false;
+  totalAmtReceivedLoaded  = false;
+  accountsReceivableLoaded = false;
   monthlyPaymentsLoaded   = false;
   overdueInvoicesLoaded   = false;
   overdue6PlusLoaded      = false;
@@ -5761,6 +5976,8 @@ registerRefreshHook(function refreshAccountsDataOnDemand() {
     fetchCurrentBankData();
     fetchPaymentSummary();
     fetchWeeklyPayments();
+    fetchTotalAmountReceivedThisMonth();
+    fetchAccountsReceivable();
     fetchMonthlyPayments();
     fetchOverdueInvoices();
     fetchOverdue6Plus();
