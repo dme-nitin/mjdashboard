@@ -772,7 +772,8 @@ function getCurrentBankData() {
    Payment Receive This Week" in the Accounts section —
    Kamaljeet / Varsha payment totals across 4 live date windows.
 
-   Source: Report!FX:GD (7-col block, FX = col 180)
+   THIS WEEK / LAST WEEK / THIS MONTH source: Report!FX:GD
+   (7-col block, FX = col 180)
      FX (col 180) = (unused here)
      FY (col 181) = (unused here)
      FZ (col 182) = (unused here)
@@ -781,24 +782,42 @@ function getCurrentBankData() {
      GC (col 185) = PAYMENT RECEIVED DATE    ← filter column
      GD (col 186) = VARSHA / KAMALJEET       ← employee grouping
 
+   TO BE RECEIVED THIS WEEK source: Report!DP:DW (SEPARATE
+   8-col block, DP = col 120) — a different range/logic entirely
+   from the 3 windows above:
+     DS (col 123) = Amount                    ← summed
+     DV (col 126) = VARSHA / KAMALJEET         ← employee grouping
+     DW (col 127) = Expected Payment Date      ← filter column
+
    4 date windows (all computed fresh from the server's current
    date on every call — nothing hardcoded, nothing cached across
    days):
      1. THIS WEEK        : Monday of the current week → TODAY
                             (not the full week — only up to today,
                             per the requirement's own example).
-     2. TO BE RECEIVED THIS WEEK : identical value to #1 (by
-                            design, per the requirement).
+                            Source: FX:GD (GC).
+     2. TO BE RECEIVED THIS WEEK : Tomorrow (today + 1 day) →
+                            this week's Saturday (inclusive).
+                            Source: DP:DW (DW). A DW date that
+                            falls on a SUNDAY is treated as if it
+                            were the following MONDAY before the
+                            range check (Sundays are never "in" a
+                            Mon–Sat week in this dashboard's
+                            shared definition) — in practice this
+                            almost always pushes such a row into
+                            NEXT week's window instead, since
+                            Monday is always after the current
+                            week's Saturday cutoff used here.
      3. LAST WEEK         : the previous FULLY COMPLETED week,
                             Monday → Saturday (7 days before this
                             week's Monday through the day before
-                            this week's Monday).
+                            this week's Monday). Source: FX:GD (GC).
      4. THIS MONTH        : 1st of the current calendar month →
-                            TODAY.
+                            TODAY. Source: FX:GD (GC).
 
-   GC is parsed via parseSheetTimestamp() (a real Date object),
-   never compared as text/string, so this is correct regardless
-   of the sheet's date display format.
+   Both GC and DW are parsed via parseSheetTimestamp() (real Date
+   objects), never compared as text/string, so this is correct
+   regardless of the sheet's date display format.
 
    Returns:
      {
@@ -865,20 +884,79 @@ function getPaymentSummaryByEmployee() {
     if (d >= monthStart && d <= todayEnd)         sums[emp].thisMonth += amount;
   });
 
+  /* ── "Payment To Be Received This Week" — SEPARATE data source
+     (Report!DP:DW, NOT FX:GD) and SEPARATE window:
+       Tomorrow (today + 1 day) → this week's Saturday (inclusive)
+     If today itself is Saturday, tomorrow is Sunday, which is
+     after this week's Saturday — the window is empty and every
+     employee's total is correctly ₹0 for the rest of that day.
+
+     DV (col 126, index 6 in this 8-col read) = Varsha/Kamaljeet
+     DW (col 127, index 7)                    = Expected Payment Date
+     DS (col 123, index 3)                    = Amount
+
+     Sunday handling: if a row's DW falls on a Sunday, it's treated
+     as if it were scheduled for the FOLLOWING Monday (Sundays are
+     never "in" any Mon–Sat week in this dashboard's shared
+     definition) — implemented by shifting the effective date
+     forward one day before the range check. */
+  var tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 0, 0, 0, 0);
+  var thisSaturdayEnd = currentWeek.end; /* Saturday 23:59:59.999 */
+
+  var toBeReceivedSums = {};
+  EMP_ORDER.forEach(function(e) { toBeReceivedSums[e] = 0; });
+
+  if (tomorrow <= thisSaturdayEnd) {
+    /* DP=120, 8 cols through DW=127 — same block getWeeklyPayments()/
+       getMonthlyPayments() read, scanned again here independently
+       since this panel's window logic is unique to it. */
+    var dpData = rep.getRange(2, 120, lastRow - 1, 8).getValues();
+
+    dpData.forEach(function(r) {
+      var amountRaw = r[3]; /* DS */
+      var empRaw    = String(r[6] || "").trim(); /* DV */
+      var dwRaw     = r[7]; /* DW */
+
+      if (!empRaw) return;
+      var emp = EMP_ORDER.filter(function(e) { return e.toLowerCase() === empRaw.toLowerCase(); })[0];
+      if (!emp) return; /* name doesn't match Kamaljeet/Varsha — skip */
+
+      var dw = parseSheetTimestamp(dwRaw);
+      if (!dw) return;
+
+      /* Sunday → shift to the following Monday before comparing */
+      var effectiveDate = dw;
+      if (dw.getDay() === 0) {
+        effectiveDate = new Date(dw.getFullYear(), dw.getMonth(), dw.getDate() + 1, 0, 0, 0, 0);
+      } else {
+        effectiveDate = new Date(dw.getFullYear(), dw.getMonth(), dw.getDate(), 0, 0, 0, 0);
+      }
+
+      if (effectiveDate < tomorrow || effectiveDate > thisSaturdayEnd) return; /* outside tomorrow→Saturday window */
+
+      var amount = typeof amountRaw === "number" ? amountRaw
+                   : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+      if (amount === 0) return;
+
+      toBeReceivedSums[emp] += amount;
+    });
+  }
+
   var employees = {};
   var total = { thisWeek: 0, toBeReceivedThisWeek: 0, lastWeek: 0, thisMonth: 0 };
   EMP_ORDER.forEach(function(e) {
-    var thisWeek  = Math.round(sums[e].thisWeek);
-    var lastWeek  = Math.round(sums[e].lastWeek);
-    var thisMonth = Math.round(sums[e].thisMonth);
+    var thisWeek             = Math.round(sums[e].thisWeek);
+    var toBeReceivedThisWeek = Math.round(toBeReceivedSums[e]);
+    var lastWeek             = Math.round(sums[e].lastWeek);
+    var thisMonth             = Math.round(sums[e].thisMonth);
     employees[e] = {
       thisWeek             : thisWeek,
-      toBeReceivedThisWeek : thisWeek, /* identical value, per requirement */
+      toBeReceivedThisWeek : toBeReceivedThisWeek,
       lastWeek             : lastWeek,
       thisMonth            : thisMonth
     };
     total.thisWeek             += thisWeek;
-    total.toBeReceivedThisWeek += thisWeek;
+    total.toBeReceivedThisWeek += toBeReceivedThisWeek;
     total.lastWeek             += lastWeek;
     total.thisMonth            += thisMonth;
   });
