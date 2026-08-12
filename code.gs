@@ -251,6 +251,22 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(wpData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Total Amount Receive This Month — used by the frontend's JSONP
+     fallback path. Same data as getTotalAmountReceivedThisMonth(). ── */
+  if (section === "totalAmountReceivedThisMonth") {
+    var tarData = getTotalAmountReceivedThisMonth();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(tarData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(tarData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  /* ── Accounts Receivable — used by the frontend's JSONP
+     fallback path. Same data as getAccountsReceivable(). ── */
+  if (section === "accountsReceivable") {
+    var arData = getAccountsReceivable();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(arData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(arData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Expected Payment Receive This Month — used by the frontend's JSONP
      fallback path. Same data as getMonthlyPayments(), just JSONP-wrapped. ── */
   if (section === "monthlyPayments") {
@@ -1022,6 +1038,164 @@ function getWeeklyPayments() {
     weekStart : monday.toISOString(),
     weekEnd   : sunday.toISOString()
   };
+}
+
+/* ══════════════════════════════════════════════════
+   getTotalAmountReceivedThisMonth()
+   Powers the "TOTAL AMOUNT RECEIVE THIS MONTH" panel — shown
+   ABOVE "Expected Payment Receive This Month" in the Accounts
+   section. Called via google.script.run, or via the
+   ?section=totalAmountReceivedThisMonth JSONP fallback in
+   doGet(e).
+
+   Source: Report!FX:GD (7-col block, FX = col 180) — the SAME
+   range the Payment Summary panel reads (its logic is untouched
+   by this function; this is an independent read of the same
+   columns):
+     FX (col 180) = Bill Date
+     FY (col 181) = Customer
+     FZ (col 182) = State
+     GA (col 183) = Model
+     GB (col 184) = Payment Received Amount  ← summed
+     GC (col 185) = Payment Received Date    ← filter column
+     GD (col 186) = Varsha / Kamaljeet
+
+   Logic: only rows whose GC falls in the CURRENT CALENDAR MONTH
+   (1st of this month → today) — computed from the server's
+   current date every call, so it always shows "1st → today" for
+   whatever the current month is, with no manual update ever
+   needed (e.g. 12 Aug → 01–12 Aug; 13 Aug → 01–13 Aug; rolls to
+   September's 1st automatically once the month changes).
+
+   Returns each row in the requested DISPLAY order already:
+     { billDate, customer, state, model, amount, receivedDate, person }
+
+   Returns: { rows: [...], total, monthStart, monthEnd }
+══════════════════════════════════════════════════ */
+function getTotalAmountReceivedThisMonth() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) return { rows: [], total: 0, monthStart: "", monthEnd: "" };
+
+  var lastRow = rep.getLastRow();
+  if (lastRow < 2) return { rows: [], total: 0, monthStart: "", monthEnd: "" };
+
+  var now      = new Date();
+  var curMonth = now.getMonth();
+  var curYear  = now.getFullYear();
+  var monthStart = new Date(curYear, curMonth, 1, 0, 0, 0, 0);
+  var todayEnd    = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+  /* FX=180, 7 cols through GD=186 */
+  var data = rep.getRange(2, 180, lastRow - 1, 7).getValues();
+  var rows = [];
+  var total = 0;
+
+  data.forEach(function(r) {
+    var billDateRaw = r[0]; /* FX */
+    var customer     = String(r[1] || "").trim(); /* FY */
+    var state        = String(r[2] || "").trim(); /* FZ */
+    var model         = String(r[3] || "").trim(); /* GA */
+    var amountRaw     = r[4]; /* GB */
+    var receivedRaw   = r[5]; /* GC */
+    var person         = String(r[6] || "").trim(); /* GD */
+
+    if (!customer && !receivedRaw) return; /* skip blank rows */
+
+    var receivedDate = parseSheetTimestamp(receivedRaw);
+    if (!receivedDate) return; /* no/invalid Payment Received Date → can't classify, skip */
+    if (receivedDate < monthStart || receivedDate > todayEnd) return; /* outside 1st-of-month → today, skip */
+
+    var billDate = parseSheetTimestamp(billDateRaw);
+    var amount = typeof amountRaw === "number" ? amountRaw
+                 : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+
+    total += amount;
+    rows.push({
+      billDate     : billDate ? billDate.toISOString() : "",
+      customer     : customer,
+      state        : state,
+      model        : model,
+      amount       : Math.round(amount),
+      receivedDate : receivedDate.toISOString(),
+      person       : person
+    });
+  });
+
+  /* Latest received date first */
+  rows.sort(function(a, b) { return new Date(b.receivedDate) - new Date(a.receivedDate); });
+
+  return {
+    rows       : rows,
+    total      : Math.round(total),
+    monthStart : monthStart.toISOString(),
+    monthEnd   : todayEnd.toISOString()
+  };
+}
+
+/* ══════════════════════════════════════════════════
+   getAccountsReceivable()
+   Powers the "ACCOUNTS RECEIVABLE" panel — shown immediately
+   BELOW "Total Amount Receive This Month" in the Accounts
+   section. Called via google.script.run, or via the
+   ?section=accountsReceivable JSONP fallback in doGet(e).
+
+   Source: Report!GF:GK (6-col block, GF = col 188) — CONFIRMED
+   column mapping:
+     GF (col 188) = Bill Date
+     GG (col 189) = Customer
+     GH (col 190) = State
+     GI (col 191) = Model
+     GJ (col 192) = Balance          ← the value shown
+     GK (col 193) = Varsha / Kamaljeet
+
+   Logic: no date filter — every row with a non-blank Customer
+   (GG) is included, live from the sheet every call. Rows with a
+   zero/blank Balance are still included (so nothing silently
+   disappears) — only rows with literally no Customer name are
+   skipped.
+
+   Returns: { rows: [ { billDate, customer, state, model, balance, person }, ... ], total }
+══════════════════════════════════════════════════ */
+function getAccountsReceivable() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) return { rows: [], total: 0 };
+
+  var lastRow = rep.getLastRow();
+  if (lastRow < 2) return { rows: [], total: 0 };
+
+  /* GF=188, 6 cols through GK=193 */
+  var data = rep.getRange(2, 188, lastRow - 1, 6).getValues();
+  var rows = [];
+  var total = 0;
+
+  data.forEach(function(r) {
+    var billDateRaw = r[0]; /* GF */
+    var customer     = String(r[1] || "").trim(); /* GG */
+    var state        = String(r[2] || "").trim(); /* GH */
+    var model         = String(r[3] || "").trim(); /* GI */
+    var balanceRaw     = r[4]; /* GJ */
+    var person          = String(r[5] || "").trim(); /* GK */
+
+    if (!customer) return; /* skip fully blank rows */
+
+    var billDate = parseSheetTimestamp(billDateRaw);
+    var balance = typeof balanceRaw === "number" ? balanceRaw
+                  : (parseFloat(String(balanceRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+
+    total += balance;
+    rows.push({
+      billDate : billDate ? billDate.toISOString() : "",
+      customer : customer,
+      state    : state,
+      model    : model,
+      balance  : Math.round(balance),
+      person   : person
+    });
+  });
+
+  return { rows: rows, total: Math.round(total) };
 }
 
 /* ══════════════════════════════════════════════════
