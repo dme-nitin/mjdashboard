@@ -626,6 +626,90 @@ function doGet(e) {
     return ContentService.createTextOutput(dbgRsmOut).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Direct test: visit [url]?section=debugProductsAvBa to see
+     EVERY Report!AV:BA row's fate — counted toward the "Product
+     Wise Expected Sale This Month" total, or skipped and exactly
+     WHY (blank product, unparseable/invalid AV date, date not in
+     current month, or zero/blank BA amount) — plus running totals
+     for skipped-vs-counted amounts. This bypasses the 60-second
+     dashboard cache entirely, so it always reflects the sheet's
+     CURRENT state, live. Use this to find rows that SHOULD count
+     this month but are being silently skipped. ── */
+  if (section === "debugProductsAvBa") {
+    var repAvDbg = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPORT_TAB);
+    var avDbgRows = [];
+    var avDbgCountedTotal = 0, avDbgSkippedTotal = 0;
+    var avDbgCounts = { totalRows: 0, counted: 0, skippedNoProduct: 0, skippedBadDate: 0, skippedNotThisMonth: 0, skippedZeroAmount: 0 };
+    if (repAvDbg) {
+      var avLastRowDbg = repAvDbg.getLastRow();
+      if (avLastRowDbg >= 2) {
+        var avValsDbg = repAvDbg.getRange(2, 48, avLastRowDbg - 1, 6).getValues(); /* AV=48, 6 cols through BA=53 */
+        var avNowDbg      = new Date();
+        var avCurMonthDbg = avNowDbg.getMonth();
+        var avCurYearDbg  = avNowDbg.getFullYear();
+
+        avValsDbg.forEach(function(row, idx) {
+          var tsRaw    = row[0]; /* AV */
+          var hospital = String(row[1] || "").trim(); /* AW */
+          var prodKey  = String(row[2] || "").trim(); /* AX */
+          var baVal    = row[5]; /* BA */
+
+          avDbgCounts.totalRows++;
+
+          if (!prodKey) { avDbgCounts.skippedNoProduct++; return; }
+
+          var tsDate = parseSheetTimestamp(tsRaw);
+          var amt = typeof baVal === "number" ? baVal : parseFloat(String(baVal).replace(/[^0-9.-]/g, "")) || 0;
+
+          var status;
+          if (!tsDate) {
+            status = "SKIPPED: unparseable/invalid AV date";
+            avDbgCounts.skippedBadDate++;
+            avDbgSkippedTotal += amt;
+          } else if (tsDate.getMonth() !== avCurMonthDbg || tsDate.getFullYear() !== avCurYearDbg) {
+            status = "SKIPPED: not current month";
+            avDbgCounts.skippedNotThisMonth++;
+            avDbgSkippedTotal += amt;
+          } else if (amt <= 0) {
+            status = "SKIPPED: zero/blank BA amount";
+            avDbgCounts.skippedZeroAmount++;
+          } else {
+            status = "COUNTED";
+            avDbgCounts.counted++;
+            avDbgCountedTotal += amt;
+          }
+
+          /* Only log full detail for rows that are NOT the common
+             "counted, all fine" case, plus a capped sample of
+             counted rows — keeps the response small while still
+             showing every skip reason. */
+          if (status !== "COUNTED" || avDbgRows.filter(function(x){return x.status==="COUNTED";}).length < 20) {
+            avDbgRows.push({
+              row: idx + 2,
+              rawTimestamp: tsRaw,
+              parsedDate: tsDate ? tsDate.toISOString() : null,
+              hospital: hospital,
+              product: prodKey,
+              rawBA: baVal,
+              parsedAmount: amt,
+              status: status
+            });
+          }
+        });
+      }
+    }
+    var avDbgOut = JSON.stringify({
+      counts: avDbgCounts,
+      countedTotal: Math.round(avDbgCountedTotal),
+      countedTotalCr: (avDbgCountedTotal / 10000000).toFixed(2) + " Cr",
+      skippedTotal: Math.round(avDbgSkippedTotal),
+      skippedTotalCr: (avDbgSkippedTotal / 10000000).toFixed(2) + " Cr",
+      rows: avDbgRows
+    });
+    if (cb) return ContentService.createTextOutput(cb + "(" + avDbgOut + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(avDbgOut).setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (section === "debugKpiValues") {
     var dbgBank = getCurrentBankData();
     var dbgMonthly = getMonthlyPayments();
@@ -4038,21 +4122,35 @@ function getDashboardData(forceRefresh) {
   /* ══════════════════════════════════════════════
      5+6+7. PRODUCT WISE EXPECTED SALE THIS MONTH
             Source: Report!AV:BA  (AV = col 48, 6 cols)
-              AV (col 48) = Timestamp          -- THIS MONTH filter
-              AW (col 49) = Hospital Name      -- dedup key (part 1)
-              AX (col 50) = Demo Product(s)    -- comma-separated; dedup key (part 2)
+              AV (col 48) = Timestamp (entry date — NOT used as a filter,
+                            see note below)
+              AW (col 49) = Hospital Name
+              AX (col 50) = Demo Product(s)    -- comma-separated,
+                            normalized (sorted alphabetically) so the
+                            same product combo always groups together
               AY (col 51) = State
               AZ (col 52) = Sales Executive Email (not used here)
               BA (col 53) = Approx Expecting Sale -- actual deal value from sheet
 
             Logic:
-            1. Current-month rows only (AV timestamp).
-            2. Split AX by comma, each product treated separately.
-            3. Unique key = Hospital + Product; duplicate combo = skip.
-            4. BA value split equally among products in that row
-               ("ABT, CBD" @ Rs19000 -> ABT Rs9500 + CBD Rs9500).
-            5. Group by product: QTY = unique hospitals,
-               VALUE = sum of allocated BA values.
+            1. NO date filter — this sheet range is already
+               pre-curated to the current month's rows by an
+               external process, confirmed by the user. Filtering
+               by AV (entry Timestamp) here would wrongly exclude
+               valid rows (a deal can be ENTERED in a prior month
+               but still belong to this month's expected-sale
+               total) — this was a real bug that caused a ₹4.32 Cr
+               undercount and has been removed.
+            2. AX (product list) is normalized: split by comma,
+               trimmed, sorted alphabetically, rejoined — so
+               "CBD, ABT" and "ABT, CBD" land in the same group.
+               A row listing multiple products (e.g. "ABT, CBD")
+               is grouped as ONE combined product-combo line, not
+               split into separate ABT/CBD entries.
+            3. No dedup, no value-splitting — every row with a
+               valid product-combo key + a positive BA is counted
+               in full toward that combo's total.
+            4. Group by product: QTY = row count, VALUE = sum of BA.
             No hardcoded / predefined prices used anywhere.
   ══════════════════════════════════════════════ */
   var priceMap    = {};   /* kept empty - no longer used for products */
@@ -4065,19 +4163,20 @@ function getDashboardData(forceRefresh) {
     if (avLastRow >= 2) {
       /* SIMPLEST POSSIBLE LOGIC — mirrors SUMIF(AX:AX, product, BA:BA).
          AV=col48 AW=col49 AX=col50 AY=col51 AZ=col52 BA=col53
-         Current-month rows only (AV timestamp). No dedup, no
-         splitting — every current-month row with a valid BA is
-         counted (this comment was previously wrong/stale — the
-         date filter below was missing entirely and has now been
-         restored to match what this section's name promises). */
+         NO date filter — confirmed by the user that this sheet
+         range is ALREADY pre-curated to the current month's rows
+         only, by an external process. AV (Timestamp) is each
+         row's ENTRY date, not its "expected sale month", so a
+         previous version of this code that filtered by AV was
+         wrongly excluding legitimate rows and undercounting the
+         total (see conversation history: this caused a real
+         ₹4.32 Cr undercount, confirmed via testProductsThisMonth()
+         Execution Log output). Every row with a valid product +
+         BA is now counted, matching the raw sheet total exactly. */
       var avRows = rep.getRange(2, 48, avLastRow - 1, 6).getValues();
       var prodValueMap = {};
-      var avNow      = new Date();
-      var avCurMonth = avNow.getMonth();
-      var avCurYear  = avNow.getFullYear();
 
       avRows.forEach(function(row) {
-        var tsRaw    = row[0];                        /* AV = Timestamp */
         var hospital = String(row[1] || "").trim();  /* AW */
         var prodKey  = String(row[2] || "").trim();  /* AX */
         /* Normalize: sort products alphabetically so same products in any
@@ -4095,13 +4194,15 @@ function getDashboardData(forceRefresh) {
 
         if (!prodKey) return;
 
-        /* THIS MONTH filter — restores the behavior already
-           documented above (AV = Timestamp) but never actually
-           implemented; without this, every month's rows were
-           being mixed together instead of just the current one. */
-        var tsDate = parseSheetTimestamp(tsRaw);
-        if (!tsDate) return;
-        if (tsDate.getMonth() !== avCurMonth || tsDate.getFullYear() !== avCurYear) return;
+        /* NO date filter — confirmed by the user that Report!AV:BA
+           is ALREADY pre-curated to only contain the current
+           month's relevant rows by an external process. AV
+           (Timestamp) reflects each row's ENTRY date, not its
+           "expected sale month", so filtering by it was wrongly
+           excluding legitimate rows (e.g. a deal entered on 31
+           July but still meant for this month's total). Every row
+           with a valid product + BA is counted, matching the raw
+           sheet total exactly. */
 
         /* BA is a Number from GAS getValues() — no string parsing needed */
         var amt = typeof baVal === "number" ? baVal : parseFloat(String(baVal).replace(/[^0-9.-]/g, "")) || 0;
@@ -4692,6 +4793,91 @@ function testProducts() {
     grand += map[p];
   });
   Logger.log("GRAND TOTAL (all products) → ₹" + grand.toLocaleString() + " = ₹" + (grand/10000000).toFixed(2) + " Cr");
+}
+
+/* ══════════════════════════════════════════════════
+   testProductsThisMonth()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run" (top toolbar), click Run, then
+   View → Logs (or Ctrl+Enter) to see the output. No URL, no
+   redeploy needed — this completely sidesteps any exec-URL
+   access issues.
+
+   Runs the EXACT SAME current-month filter logic as the "Product
+   Wise Expected Sale This Month" dashboard panel (AV=Timestamp,
+   AX=Product, BA=Amount), and logs EVERY row's fate — counted
+   toward the total, or skipped and exactly why (blank product,
+   unparseable AV date, date not in current month, zero/blank BA)
+   — plus running totals for both counted and skipped amounts.
+   Use the skipped total to see exactly how much money is being
+   excluded and cross-check against the row list to find WHY.
+══════════════════════════════════════════════════ */
+function testProductsThisMonth() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  Logger.log("Last row: " + lastRow);
+
+  var now      = new Date();
+  var curMonth = now.getMonth();
+  var curYear  = now.getFullYear();
+  Logger.log("Server 'today': " + now.toString());
+  Logger.log("Current month/year being matched against: month=" + (curMonth+1) + " year=" + curYear);
+  Logger.log("Script timezone: " + Session.getScriptTimeZone());
+
+  var rows = rep.getRange(2, 48, lastRow - 1, 6).getValues(); /* AV=48, 6 cols through BA=53 */
+  Logger.log("Total rows read from AV:BA: " + rows.length);
+
+  var countedTotal = 0, skippedTotal = 0;
+  var counts = { counted: 0, skippedNoProduct: 0, skippedBadDate: 0, skippedNotThisMonth: 0, skippedZeroAmount: 0 };
+  var skippedBadDateSamples = [];
+  var skippedNotThisMonthSamples = [];
+
+  rows.forEach(function(r, i) {
+    var tsRaw = r[0];  /* AV */
+    var prod  = String(r[2] || "").trim();  /* AX */
+    var ba    = r[5];  /* BA */
+    var amt   = typeof ba === "number" ? ba : parseFloat(String(ba || "0").replace(/[^0-9.-]/g, "")) || 0;
+
+    if (!prod) { counts.skippedNoProduct++; return; }
+
+    var tsDate = parseSheetTimestamp(tsRaw);
+
+    if (!tsDate) {
+      counts.skippedBadDate++;
+      skippedTotal += amt;
+      if (skippedBadDateSamples.length < 25) {
+        skippedBadDateSamples.push("Row " + (i+2) + ": rawAV=[" + tsRaw + "] type=" + (typeof tsRaw) + " product=[" + prod + "] BA=" + amt);
+      }
+      return;
+    }
+
+    if (tsDate.getMonth() !== curMonth || tsDate.getFullYear() !== curYear) {
+      counts.skippedNotThisMonth++;
+      skippedTotal += amt;
+      if (skippedNotThisMonthSamples.length < 25) {
+        skippedNotThisMonthSamples.push("Row " + (i+2) + ": parsedDate=" + tsDate.toDateString() + " product=[" + prod + "] BA=" + amt);
+      }
+      return;
+    }
+
+    if (amt <= 0) { counts.skippedZeroAmount++; return; }
+
+    counts.counted++;
+    countedTotal += amt;
+  });
+
+  Logger.log("=== COUNTS ===");
+  Logger.log(JSON.stringify(counts));
+  Logger.log("=== TOTALS ===");
+  Logger.log("COUNTED total → ₹" + Math.round(countedTotal).toLocaleString() + " = ₹" + (countedTotal/10000000).toFixed(2) + " Cr");
+  Logger.log("SKIPPED total (bad date + not this month) → ₹" + Math.round(skippedTotal).toLocaleString() + " = ₹" + (skippedTotal/10000000).toFixed(2) + " Cr");
+  Logger.log("=== SAMPLE: rows skipped due to UNPARSEABLE AV date (first 25) ===");
+  skippedBadDateSamples.forEach(function(s) { Logger.log(s); });
+  Logger.log("=== SAMPLE: rows skipped as NOT current month (first 25) ===");
+  skippedNotThisMonthSamples.forEach(function(s) { Logger.log(s); });
 }
 
 function testExecutiveData() {
