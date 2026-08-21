@@ -903,6 +903,19 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
       <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
     </div>
   </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="ph">
+      <div class="sec-h" style="margin:0;">Confirmed Customers</div>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div id="confirmedCustomersCount" style="font-size:12px;font-weight:700;color:var(--teal);font-family:'IBM Plex Mono',monospace;"></div>
+        <div id="confirmedCustomersTotalSale" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;"></div>
+      </div>
+    </div>
+    <div id="confirmedCustomersTbl">
+      <div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No customers confirmed yet — tick "Confirm" in the table above to add them here.</div>
+    </div>
+  </div>
 </div>
 
 
@@ -3836,18 +3849,92 @@ function renderProspectiveCustomersList(data) {
   if (!el) return;
 
   cProspectiveRowsRaw = Array.isArray(data) ? data : [];
+  /* Assign a stable, index-based _id to every row so the
+     "Confirm / Not Confirm" checkbox state stays correctly
+     attached to the right row across sorting/filtering/re-renders
+     (which rebuild the table's HTML but must not lose track of
+     which specific rows were ticked). */
+  cProspectiveRowsRaw.forEach(function(r, i) { r._id = i; });
   prospectiveFilters = { hospital: [], state: [], product: [], month: [], sale: [], rsm: [] };
   prospectiveOpenDropdown = null;
   prospectiveSearchText = { hospital: '', state: '', product: '', month: '', sale: '', rsm: '' };
+  confirmedProspectiveIds = new Set();
 
   if (!cProspectiveRowsRaw.length) {
     el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No records found.</div>';
     const totalEl0 = document.getElementById('prospectiveTotalSale');
     if (totalEl0) totalEl0.textContent = '';
+    renderConfirmedCustomersPanel();
     return;
   }
 
   buildProspectiveTable();
+  renderConfirmedCustomersPanel();
+}
+
+/* Tracks which rows (by their stable _id) are ticked "Confirm" —
+   in-memory only (no backend/persistence involved), real-time:
+   toggling a checkbox immediately updates the Confirmed Customers
+   panel below, no refresh needed. Reset whenever the Prospective
+   Customers list is (re)loaded from the server. */
+let confirmedProspectiveIds = new Set();
+
+function onProspectiveConfirmToggle(id, checked) {
+  id = Number(id);
+  if (checked) confirmedProspectiveIds.add(id);
+  else confirmedProspectiveIds.delete(id);
+  renderConfirmedCustomersPanel();
+}
+
+/* Renders the "Confirmed Customers" panel — same table styling
+   as the main Prospective Customers table above it, showing only
+   the rows currently ticked, with the same 6 detail columns
+   (Hospital/State/Product/Month/Sale/RSM). Looked up from
+   cProspectiveRowsRaw by _id, so it always reflects the latest
+   underlying data. */
+function renderConfirmedCustomersPanel() {
+  const el = document.getElementById('confirmedCustomersTbl');
+  const countEl = document.getElementById('confirmedCustomersCount');
+  const totalSaleEl = document.getElementById('confirmedCustomersTotalSale');
+  if (!el) return;
+
+  const confirmedRows = cProspectiveRowsRaw.filter(function(r) { return confirmedProspectiveIds.has(r._id); });
+
+  if (countEl) countEl.textContent = confirmedRows.length ? (confirmedRows.length + ' CONFIRMED') : '';
+
+  const confirmedTotalSale = confirmedRows.reduce(function(sum, r) { return sum + (Number(r.sale) || 0); }, 0);
+  if (totalSaleEl) totalSaleEl.textContent = confirmedRows.length ? ('TOTAL EXPECTED SALE: ' + fmtRupee(confirmedTotalSale)) : '';
+
+  if (!confirmedRows.length) {
+    el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No customers confirmed yet — tick "Confirm" in the table above to add them here.</div>';
+    return;
+  }
+
+  const bodyRows = confirmedRows.map(function(r, idx) {
+    return '<tr>' +
+      '<td style="text-align:center;width:36px;color:var(--tf);font-family:\'IBM Plex Mono\',monospace;">' + (idx + 1) + '</td>' +
+      '<td style="font-weight:500;">' + (r.hospital || '—') + '</td>' +
+      '<td>' + (r.state || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' + (r.product || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' + (r.month || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(r.sale) + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' + (r.rsm || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="compact-table">' +
+      '<thead><tr>' +
+        '<th style="text-align:center;width:36px;">#</th>' +
+        '<th>Hospital Name</th>' +
+        '<th>State</th>' +
+        '<th style="text-align:center;padding-left:10px;">Demo Product</th>' +
+        '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
+        '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
+        '<th style="text-align:center;padding-left:10px;">RSM</th>' +
+      '</tr></thead>' +
+      '<tbody>' + bodyRows + '</tbody>' +
+    '</table>';
 }
 
 /* Column → row-field + label, used for both the dropdown filter
@@ -3970,6 +4057,7 @@ function buildProspectiveTable() {
         dropdownHtml(col) +
       '</th>';
     }).join('') +
+    '<th style="top:27px;"></th>' +
   '</tr>';
 
   if (!filteredRows.length) {
@@ -3983,6 +4071,7 @@ function buildProspectiveTable() {
           '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
           '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
           '<th style="text-align:center;padding-left:10px;">RSM</th>' +
+          '<th style="text-align:center;padding-left:10px;">Confirm / Not Confirm</th>' +
         '</tr></thead>' +
         filterRowHtml +
       '</table>' +
@@ -3991,6 +4080,7 @@ function buildProspectiveTable() {
   }
 
   const bodyRows = filteredRows.map(function(r, idx) {
+    const isConfirmed = confirmedProspectiveIds.has(r._id);
     return '<tr>' +
       '<td style="text-align:center;width:36px;color:var(--tf);font-family:\'IBM Plex Mono\',monospace;">' + (idx + 1) + '</td>' +
       '<td style="font-weight:500;">' + (r.hospital || '—') + '</td>' +
@@ -3999,6 +4089,9 @@ function buildProspectiveTable() {
       '<td style="text-align:center;padding-left:10px;">' + (r.month || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(r.sale) + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.rsm || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' +
+        '<input type="checkbox" ' + (isConfirmed ? 'checked' : '') + ' data-id="' + r._id + '" onchange="onProspectiveConfirmToggle(this.dataset.id, this.checked)" style="cursor:pointer;width:16px;height:16px;">' +
+      '</td>' +
     '</tr>';
   }).join('');
 
@@ -4012,6 +4105,7 @@ function buildProspectiveTable() {
         '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
         '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
         '<th style="text-align:center;padding-left:10px;">RSM</th>' +
+        '<th style="text-align:center;padding-left:10px;">Confirm / Not Confirm</th>' +
       '</tr></thead>' +
       filterRowHtml +
       '<tbody>' + bodyRows + '</tbody>' +
