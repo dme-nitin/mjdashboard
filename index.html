@@ -464,6 +464,9 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   <button class="nav-btn" id="rsmReviewBtn" onclick="openRsmReviewDashboard()" title="Open RSM Review Dashboard in a new tab">
     <span class="pd" style="background:#059669;"></span>RSM Review Dashboard
   </button>
+  <button class="nav-btn" id="reorderBtn" onclick="openReorderApp()" title="Open Reorder in a new tab">
+    <span class="pd" style="background:#DC2626;"></span>Reorder
+  </button>
 </div>
 
 <div id="salesExecSection" style="display:none;">
@@ -3794,6 +3797,15 @@ function openRsmReviewDashboard() {
 }
 
 /* ══════════════════════════════════════════════════
+   Reorder button — another separate static site (GitHub Pages),
+   same simple pattern as Quotation Form/AMC/CMC/RSM Review
+   Dashboard: opens directly in a new browser tab.
+══════════════════════════════════════════════════ */
+function openReorderApp() {
+  window.open(REORDER_URL, '_blank');
+}
+
+/* ══════════════════════════════════════════════════
    Prospective Customers list — fetch + render
    Data comes from getProspectiveCustomersList() (Report!BJ:BP),
    already returned in the requested display order (Hospital,
@@ -5889,6 +5901,8 @@ const QUOTATION_APP_URL = "https://dme-nitin.github.io/GlobalMedicareQuotation/"
 const AMC_CMC_URL = "https://dme-nitin.github.io/amc-cmc/";
 
 const RSM_REVIEW_DASHBOARD_URL = "https://dme-nitin.github.io/rsm-review-dashboard/";
+
+const REORDER_URL = "https://dme-nitin.github.io/consumables-reorder/";
 
 const IS_GAS = (typeof google !== 'undefined' && google.script && google.script.run);
 
