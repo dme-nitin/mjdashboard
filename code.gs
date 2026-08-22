@@ -735,6 +735,18 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(pcData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Set/clear a Prospective Customer's "Confirm" checkbox —
+     persisted server-side (PropertiesService), shared across every
+     user/device. Used by the frontend's JSONP fallback path (when
+     not running inside the google.script.run sandbox). ── */
+  if (section === "setProspectiveConfirm") {
+    var spcFingerprint = e.parameter.fingerprint || "";
+    var spcConfirmed   = e.parameter.confirmed === "1";
+    var spcResult = setProspectiveConfirmStatus(spcFingerprint, spcConfirmed);
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(spcResult) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(spcResult)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Direct test: visit [url]?section=debugCashflow to see EVERY raw
      Report!EC:EG row that falls in the current month, plus the
      normalized group key each one lands under — use this to verify
@@ -3328,6 +3340,63 @@ function getAllExpectedSaleRows() {
 }
 
 /* ══════════════════════════════════════════════════
+   Prospective Customers "Confirm / Not Confirm" checkbox —
+   PERSISTENT, SHARED storage.
+
+   Each row has no natural unique ID column in Report!BJ:BP, so a
+   stable "fingerprint" is built from its own visible field values
+   (Hospital|State|Product|Month|Sale|RSM). This fingerprint is
+   used as the key for marking a row Confirmed — it survives page
+   reloads, browser restarts, and is the SAME for every user on
+   every device (stored server-side via PropertiesService, not in
+   browser storage), matching the requirement exactly. It also
+   survives the sheet's rows being reordered/re-sorted, since it's
+   based on content, not row position.
+
+   Storage: PropertiesService.getScriptProperties(), one key
+   holding a JSON array of confirmed fingerprint strings. Small
+   enough (list of short strings) to comfortably fit within
+   Apps Script's property size limits for realistic list sizes.
+══════════════════════════════════════════════════ */
+var PROSPECTIVE_CONFIRM_PROP_KEY = "confirmedProspectiveCustomers_v1";
+
+function buildProspectiveFingerprint(hospital, state, product, month, sale, rsm) {
+  return [hospital, state, product, month, sale, rsm].map(function(v) {
+    return String(v == null ? "" : v).trim().toLowerCase();
+  }).join("|");
+}
+
+function getConfirmedProspectiveFingerprints() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty(PROSPECTIVE_CONFIRM_PROP_KEY);
+  if (!raw) return [];
+  try {
+    var list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/* Called from the checkbox's onchange (via google.script.run or
+   the JSONP fallback route) — adds/removes ONE fingerprint from
+   the persisted confirmed list. Returns the updated count so the
+   frontend can sanity-check the write succeeded. */
+function setProspectiveConfirmStatus(fingerprint, confirmed) {
+  if (!fingerprint) return { ok: false, count: 0 };
+  var props = PropertiesService.getScriptProperties();
+  var list = getConfirmedProspectiveFingerprints();
+  var idx = list.indexOf(fingerprint);
+  if (confirmed) {
+    if (idx === -1) list.push(fingerprint);
+  } else {
+    if (idx !== -1) list.splice(idx, 1);
+  }
+  props.setProperty(PROSPECTIVE_CONFIRM_PROP_KEY, JSON.stringify(list));
+  return { ok: true, count: list.length };
+}
+
+/* ══════════════════════════════════════════════════
    getProspectiveCustomersList()
    Powers the standalone "PROSPECTIVE CUSTOMERS" section (its
    own button + same-page section, next to Accounts/HR).
@@ -3353,9 +3422,14 @@ function getAllExpectedSaleRows() {
    Returns each row already in the requested DISPLAY order
    (Hospital, State, Product, Month, Sale, RSM) as an object —
    the frontend just renders these fields directly, in this
-   order, with no email field present at all.
+   order, with no email field present at all. Each row ALSO
+   carries a `fingerprint` (its persistent checkbox identity) and
+   `confirmed` (its current Confirm/Not Confirm status, read live
+   from PropertiesService) — so the frontend never has to reset
+   checkboxes to unchecked on load; it always reflects the truly
+   saved state.
 
-   Returns: [ { hospital, state, product, month, sale, rsm }, ... ]
+   Returns: [ { hospital, state, product, month, sale, rsm, fingerprint, confirmed }, ... ]
 ══════════════════════════════════════════════════ */
 function getProspectiveCustomersList() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
@@ -3364,6 +3438,9 @@ function getProspectiveCustomersList() {
 
   var lastRow = rep.getLastRow();
   if (lastRow < 2) return [];
+
+  var confirmedSet = {};
+  getConfirmedProspectiveFingerprints().forEach(function(fp) { confirmedSet[fp] = true; });
 
   /* BJ=62, 7 cols through BP=68 */
   var data = rep.getRange(2, 62, lastRow - 1, 7).getValues();
@@ -3389,14 +3466,19 @@ function getProspectiveCustomersList() {
 
     var sale = typeof saleRaw === "number" ? saleRaw
                : (parseFloat(String(saleRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    var saleRounded = Math.round(sale);
+
+    var fingerprint = buildProspectiveFingerprint(hospital, state, product, month, saleRounded, rsm);
 
     rows.push({
-      hospital : hospital,
-      state    : state,
-      product  : product,
-      month    : month,
-      sale     : Math.round(sale),
-      rsm      : rsm
+      hospital    : hospital,
+      state       : state,
+      product     : product,
+      month       : month,
+      sale        : saleRounded,
+      rsm         : rsm,
+      fingerprint : fingerprint,
+      confirmed   : !!confirmedSet[fingerprint]
     });
   });
 
