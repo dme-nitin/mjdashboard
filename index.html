@@ -3861,16 +3861,20 @@ function renderProspectiveCustomersList(data) {
   if (!el) return;
 
   cProspectiveRowsRaw = Array.isArray(data) ? data : [];
-  /* Assign a stable, index-based _id to every row so the
-     "Confirm / Not Confirm" checkbox state stays correctly
-     attached to the right row across sorting/filtering/re-renders
-     (which rebuild the table's HTML but must not lose track of
-     which specific rows were ticked). */
-  cProspectiveRowsRaw.forEach(function(r, i) { r._id = i; });
   prospectiveFilters = { hospital: [], state: [], product: [], month: [], sale: [], rsm: [] };
   prospectiveOpenDropdown = null;
   prospectiveSearchText = { hospital: '', state: '', product: '', month: '', sale: '', rsm: '' };
+
+  /* Confirmed status is now PERSISTED server-side (PropertiesService,
+     shared across every user/device) — each row already carries its
+     own `confirmed` flag and `fingerprint` (its persistent identity)
+     from getProspectiveCustomersList(). Populate the local Set from
+     that instead of resetting to empty, so a page reload / re-open
+     correctly shows whatever was actually saved. */
   confirmedProspectiveIds = new Set();
+  cProspectiveRowsRaw.forEach(function(r) {
+    if (r.confirmed && r.fingerprint) confirmedProspectiveIds.add(r.fingerprint);
+  });
 
   if (!cProspectiveRowsRaw.length) {
     el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No records found.</div>';
@@ -3884,18 +3888,42 @@ function renderProspectiveCustomersList(data) {
   renderConfirmedCustomersPanel();
 }
 
-/* Tracks which rows (by their stable _id) are ticked "Confirm" —
-   in-memory only (no backend/persistence involved), real-time:
-   toggling a checkbox immediately updates the Confirmed Customers
-   panel below, no refresh needed. Reset whenever the Prospective
-   Customers list is (re)loaded from the server. */
+/* Tracks which rows are ticked "Confirm" — keyed by each row's
+   persistent FINGERPRINT (built server-side from its own visible
+   field values), not a session-local array index. This Set is
+   just an in-memory mirror of what's ALREADY saved server-side
+   (PropertiesService) for fast UI lookups; the actual source of
+   truth persists across refresh/reload/browser-close and is the
+   same for every user on every device — see
+   setProspectiveConfirmStatus() in Code.gs. */
 let confirmedProspectiveIds = new Set();
 
-function onProspectiveConfirmToggle(id, checked) {
-  id = Number(id);
-  if (checked) confirmedProspectiveIds.add(id);
-  else confirmedProspectiveIds.delete(id);
+function onProspectiveConfirmToggle(fingerprint, checked) {
+  /* Update the UI immediately (optimistic) ... */
+  if (checked) confirmedProspectiveIds.add(fingerprint);
+  else confirmedProspectiveIds.delete(fingerprint);
   renderConfirmedCustomersPanel();
+
+  /* ...then persist the change server-side so it survives refresh,
+     reload, and is visible to every other user/device. */
+  if (IS_GAS) {
+    google.script.run
+      .withFailureHandler(function(err) {
+        console.error('[GM] setProspectiveConfirmStatus error:', err);
+      })
+      .setProspectiveConfirmStatus(fingerprint, checked);
+  } else {
+    const cbName = '__gmspccb' + Date.now();
+    window[cbName] = function() { delete window[cbName]; s.remove(); };
+    const s = document.createElement('script');
+    s.src = DEPLOYED_URL + '?callback=' + cbName +
+      '&section=setProspectiveConfirm' +
+      '&fingerprint=' + encodeURIComponent(fingerprint) +
+      '&confirmed=' + (checked ? '1' : '0') +
+      '&_=' + Date.now();
+    s.onerror = function() { console.error('[GM] setProspectiveConfirm network error'); s.remove(); };
+    document.head.appendChild(s);
+  }
 }
 
 /* Renders the "Confirmed Customers" panel — same table styling
@@ -3910,7 +3938,7 @@ function renderConfirmedCustomersPanel() {
   const totalSaleEl = document.getElementById('confirmedCustomersTotalSale');
   if (!el) return;
 
-  const confirmedRows = cProspectiveRowsRaw.filter(function(r) { return confirmedProspectiveIds.has(r._id); });
+  const confirmedRows = cProspectiveRowsRaw.filter(function(r) { return confirmedProspectiveIds.has(r.fingerprint); });
 
   if (countEl) countEl.textContent = confirmedRows.length ? (confirmedRows.length + ' CONFIRMED') : '';
 
@@ -4092,7 +4120,7 @@ function buildProspectiveTable() {
   }
 
   const bodyRows = filteredRows.map(function(r, idx) {
-    const isConfirmed = confirmedProspectiveIds.has(r._id);
+    const isConfirmed = confirmedProspectiveIds.has(r.fingerprint);
     return '<tr>' +
       '<td style="text-align:center;width:36px;color:var(--tf);font-family:\'IBM Plex Mono\',monospace;">' + (idx + 1) + '</td>' +
       '<td style="font-weight:500;">' + (r.hospital || '—') + '</td>' +
@@ -4102,7 +4130,7 @@ function buildProspectiveTable() {
       '<td style="text-align:center;padding-left:10px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(r.sale) + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.rsm || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' +
-        '<input type="checkbox" ' + (isConfirmed ? 'checked' : '') + ' data-id="' + r._id + '" onchange="onProspectiveConfirmToggle(this.dataset.id, this.checked)" style="cursor:pointer;width:16px;height:16px;">' +
+        '<input type="checkbox" ' + (isConfirmed ? 'checked' : '') + ' data-fp="' + String(r.fingerprint || '').replace(/"/g, '&quot;') + '" onchange="onProspectiveConfirmToggle(this.dataset.fp, this.checked)" style="cursor:pointer;width:16px;height:16px;">' +
       '</td>' +
     '</tr>';
   }).join('');
@@ -6445,6 +6473,268 @@ setBadge('seed');
    registered refresh hook (see REFRESH HOOK REGISTRY near the
    top of this script) so the Accounts section stays in sync
    with the main dashboard on every manual refresh. */
+
+/* ══════════════════════════════════════════════════════════════
+   UNIVERSAL PRINT SYSTEM
+   ----------------------------------------------------------------
+   Adds a small 🖨️ print icon next to EVERY panel's title across
+   the ENTIRE dashboard — MJ, Sales, Accounts, HR, Prospective
+   Customers, Sales Executive Reports, Unique Added This Month,
+   the main RSM Scorecards page — every page, every section that
+   has a `.panel > .sec-h` (or `.panel > .ph > .sec-h`) heading.
+
+   Clicking a panel's print icon opens a clean, isolated print
+   window containing ONLY that panel's current content (its title
+   + whatever table/data is inside it right now) — never the rest
+   of the dashboard, never buttons/filters/nav/search boxes. The
+   browser's native print dialog then opens automatically for
+   that window alone.
+
+   Why a MutationObserver instead of manually wiring every render
+   function: most panels' actual content (tables) is rendered
+   AFTER page load, by many different fetch-driven render
+   functions scattered throughout this file, and sections are
+   shown/hidden by JS rather than being separate pages. Watching
+   the DOM for new `.panel` elements (and re-scanning existing
+   ones whenever their content changes) guarantees every current
+   AND future panel gets a print button with zero risk of missing
+   one — without touching a single existing render/fetch/filter
+   function.
+
+   IMPORTANT: this ONLY adds a button element per panel. It does
+   not modify any existing calculation, filter, fetch, or render
+   logic anywhere in the file.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Same color variables as the main page's :root — inline styles
+   throughout this dashboard reference var(--xxx), and a freshly
+   opened print window has no access to the main document's CSS,
+   so these must be redefined there for colors/borders to render
+   correctly in the printed output. This is a light theme already
+   (white panel backgrounds, dark text), so it translates well to
+   paper with no further remapping needed. */
+const PRINT_ROOT_VARS = `
+  :root{
+    --bg:#D4D4D7; --ink:#0F172A; --ink2:#FFFFFF; --ink3:#F8FAFC;
+    --ts:#475569; --tf:#94A3B8; --line:#E2E8F0;
+    --primary:#2563EB; --primary-dark:#1D4ED8; --primary-light:#EFF6FF;
+    --teal:#0F766E; --teal-light:#F0FDFA; --coral:#DC2626; --coral-light:#FEF2F2;
+    --amber:#F59E0B; --success:#16A34A; --gold:#2563EB; --gb:#1E40AF;
+    --brand-blue:#2DAAE1; --brand-green:#69B42E;
+  }
+`;
+
+function printPanelElement(panelEl, title) {
+  if (!panelEl) return;
+
+  /* Work on a clone so the LIVE dashboard is never touched. */
+  const clone = panelEl.cloneNode(true);
+
+  /* Strip everything that only makes sense on-screen: our own
+     print buttons (avoid a stray icon inside the print output),
+     every interactive control (buttons, search boxes, dropdown
+     filter panels/selects, checkboxes used for on-screen actions
+     only), and anything explicitly marked .no-print. */
+  clone.querySelectorAll('.panel-print-btn, button, input, select, .pf-dd-panel, .no-print').forEach(function(elToStrip) {
+    elToStrip.remove();
+  });
+
+  /* Force every scrollable/height-limited container in the clone
+     to show its FULL content — many panels use overflow-y:auto
+     with a max-height or flex:1 so they fit on screen, which
+     would otherwise clip the printed output to only whatever was
+     currently scrolled into view. */
+  clone.querySelectorAll('*').forEach(function(elToExpand) {
+    elToExpand.style.maxHeight = 'none';
+    elToExpand.style.height = 'auto';
+    elToExpand.style.overflow = 'visible';
+    elToExpand.style.overflowX = 'visible';
+    elToExpand.style.overflowY = 'visible';
+  });
+
+  const printWindow = window.open('', '_blank', 'width=1050,height=850');
+  if (!printWindow) {
+    alert('Please allow pop-ups for this site to use Print.');
+    return;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(
+    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<title>' + title.replace(/</g, '&lt;') + '</title>' +
+    '<style>' +
+      PRINT_ROOT_VARS +
+      '@page { size: A4; margin: 12mm; }' +
+      '*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+      'body{font-family:"Inter",Arial,Helvetica,sans-serif;color:var(--ink);margin:0;padding:0;background:#fff;font-size:11px;}' +
+      '.print-header{border-bottom:2px solid var(--primary);padding-bottom:10px;margin-bottom:16px;}' +
+      '.print-title{font-size:16px;font-weight:700;color:var(--ink);margin:0;}' +
+      '.print-meta{font-size:10px;color:var(--tf);margin-top:4px;}' +
+      'table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:4px;}' +
+      'th,td{padding:5px 7px;border:1px solid var(--line);text-align:left;}' +
+      'thead{display:table-header-group;}' /* repeats table headers on every printed page */ +
+      'tr{page-break-inside:avoid;}' +
+      'thead th{background:var(--ink3) !important;font-weight:700;color:var(--ink);text-transform:none;letter-spacing:0;font-size:10px;}' +
+      '.panel{box-shadow:none !important;border:none !important;padding:0 !important;background:#fff !important;}' +
+      '.ph{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;}' +
+      '.sec-h{font-size:13px;font-weight:700;color:var(--ink);}' +
+      '.sec-sub{font-size:9.5px;color:var(--tf);}' +
+      '.kpi,.nav-btn,.rbtn,.fp{display:none !important;}' +
+      '@media print { .no-print{display:none !important;} }' +
+    '</style>' +
+    '</head><body>' +
+      '<div class="print-header">' +
+        '<div class="print-title">' + title.replace(/</g, '&lt;') + '</div>' +
+        '<div class="print-meta">Global Medicare — RSM Dashboard · Printed ' + new Date().toLocaleString('en-IN') + '</div>' +
+      '</div>' +
+      clone.innerHTML +
+    '</body></html>'
+  );
+  printWindow.document.close();
+
+  printWindow.onload = function() {
+    printWindow.focus();
+    printWindow.print();
+  };
+}
+
+/* Scans (or re-scans) for every `.panel` that has a title heading
+   and doesn't already have a print button, and adds one. Safe to
+   call repeatedly — panels that already got a button are skipped
+   (tracked via a data attribute), so nothing is ever duplicated. */
+/* Builds the print button element itself — a clean, modern
+   printer icon (inline SVG, so no external font/network
+   dependency) inside a light rounded-square "card": subtle
+   border, slight shadow, consistent padding/size everywhere it
+   appears. Visually matches a standard printer glyph (body +
+   paper tray), dark grey/black icon on a white background. */
+function createPanelPrintButton(panel, heading) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'panel-print-btn no-print';
+  btn.title = 'Print this report';
+  btn.setAttribute('aria-label', 'Print this report');
+  btn.style.cssText =
+    'background:#ffffff;border:1px solid #D8DEE8;border-radius:8px;' +
+    'width:30px;height:30px;padding:0;cursor:pointer;flex-shrink:0;' +
+    'display:inline-flex;align-items:center;justify-content:center;' +
+    'box-shadow:0 1px 3px rgba(15,23,42,.12);';
+  btn.innerHTML =
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M6 9V3h12v6" stroke="#334155" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<rect x="4" y="9" width="16" height="8" rx="1.5" stroke="#334155" stroke-width="1.8"/>' +
+      '<rect x="7" y="14" width="10" height="7" fill="#334155"/>' +
+      '<circle cx="17" cy="11.5" r="0.9" fill="#334155"/>' +
+    '</svg>';
+  btn.onmouseenter = function() { btn.style.borderColor = '#94A3B8'; btn.style.boxShadow = '0 2px 5px rgba(15,23,42,.18)'; };
+  btn.onmouseleave = function() { btn.style.borderColor = '#D8DEE8'; btn.style.boxShadow = '0 1px 3px rgba(15,23,42,.12)'; };
+  btn.onclick = function(ev) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    printPanelElement(panel, heading.textContent.trim());
+  };
+  return btn;
+}
+
+function injectPrintButtons() {
+  document.querySelectorAll('.panel').forEach(function(panel) {
+    if (panel.hasAttribute('data-print-ready')) return;
+
+    /* Headings show up nested at different depths across this
+       file's various panel layouts: directly under .panel, inside
+       a dedicated .ph title-row, inside a plain (unclassed)
+       wrapper div, or (less commonly) even the .panel ITSELF
+       acting as its own flex header row. Search up to 2 levels
+       deep so all of these are found. */
+    const heading = panel.querySelector(':scope > .sec-h') ||
+                    panel.querySelector(':scope > .ph > .sec-h') ||
+                    panel.querySelector(':scope > div > .sec-h');
+    if (!heading) return; /* not a titled report/table panel — skip */
+
+    panel.setAttribute('data-print-ready', '1');
+    const btn = createPanelPrintButton(panel, heading);
+
+    /* Walk up from the heading looking for the nearest ancestor
+       (stopping at, and including, the panel itself) that's
+       actually laid out as a flex row — this is the panel's real
+       "header row", whatever wrapper class (or lack of one) it
+       uses. */
+    let headerRow = null;
+    let node = heading.parentElement;
+    while (node) {
+      if (getComputedStyle(node).display.indexOf('flex') !== -1) { headerRow = node; break; }
+      if (node === panel) break;
+      node = node.parentElement;
+    }
+
+    if (headerRow) {
+      /* Identify which direct child of the header row the heading
+         itself belongs to (could be the row directly, or one
+         wrapper div deep), then find whichever OTHER direct child
+         is already sitting on the right (a "Back to Dashboard"
+         button, a search box, a Reset/Refresh control, a
+         count/total badge, etc.). */
+      let headingBranch = heading;
+      while (headingBranch.parentElement !== headerRow && headingBranch.parentElement) {
+        headingBranch = headingBranch.parentElement;
+      }
+
+      let rightContainer = null;
+      Array.prototype.forEach.call(headerRow.children, function(child) {
+        if (child !== headingBranch) rightContainer = child;
+      });
+
+      if (rightContainer) {
+        btn.style.marginLeft = '10px';
+        /* Buttons/links can't safely contain another <button> as a
+           child (invalid nesting, unpredictable browser parsing) —
+           in that case place the print icon right beside it as a
+           sibling instead of inside it. */
+        const tag = rightContainer.tagName;
+        if (tag === 'BUTTON' || tag === 'A') {
+          rightContainer.insertAdjacentElement('afterend', btn);
+        } else {
+          if (getComputedStyle(rightContainer).display.indexOf('flex') === -1) {
+            rightContainer.style.display = 'inline-flex';
+            rightContainer.style.alignItems = 'center';
+          }
+          rightContainer.appendChild(btn);
+        }
+      } else {
+        headerRow.appendChild(btn);
+      }
+    } else {
+      /* No flex header row anywhere between the heading and the
+         panel — just a plain block-level title with no existing
+         right-side content to collide with, so the print icon is
+         pinned directly to the panel's own top-right corner. */
+      if (getComputedStyle(panel).position === 'static') {
+        panel.style.position = 'relative';
+      }
+      btn.style.position = 'absolute';
+      btn.style.top = '16px';
+      btn.style.right = '18px';
+      btn.style.zIndex = '5';
+      panel.appendChild(btn);
+    }
+  });
+}
+
+/* Run once now (covers panels already in the DOM), then keep
+   watching for new panels/headings appearing anywhere on the page
+   (fetch-driven tables rendering in, sections being toggled open
+   for the first time, etc.) so print buttons appear automatically
+   without needing to touch any of those render functions. Debounced
+   slightly so rapid DOM updates (typing in a search box, filter
+   re-renders) don't trigger a wasteful burst of re-scans. */
+injectPrintButtons();
+
+let _printButtonScanTimer = null;
+const printButtonObserver = new MutationObserver(function() {
+  clearTimeout(_printButtonScanTimer);
+  _printButtonScanTimer = setTimeout(injectPrintButtons, 150);
+});
+printButtonObserver.observe(document.body, { childList: true, subtree: true });
 
 </script>
 </body>
