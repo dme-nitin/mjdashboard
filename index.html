@@ -754,7 +754,7 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
       </button>
     </div>
     <div id="mjInvCollapseWrap" class="mj-inv-collapse">
-      <div class="panel" style="margin-top:10px;">
+      <div class="panel" id="mjInventoryPanel" style="margin-top:10px;">
         <div class="sec-sub" style="margin:-10px 0 14px;display:none;">Click a company to expand its items · Qty and Amount from Report!DY:EA</div>
         <div id="inventoryItemWiseTblMj">
           <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
@@ -762,7 +762,7 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
       </div>
     </div>
     <div id="mjPoCollapseWrap" class="mj-inv-collapse">
-      <div class="panel" style="margin-top:10px;">
+      <div class="panel" id="mjPoInHandPanel" style="margin-top:10px;">
         <div class="sec-sub" style="margin:-10px 0 14px;display:none;">Source: Report!FP:FU</div>
         <div id="poInHandTblMj" style="max-height:420px;overflow-y:auto;">
           <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
@@ -6649,74 +6649,81 @@ function injectPrintButtons() {
     const heading = panel.querySelector(':scope > .sec-h') ||
                     panel.querySelector(':scope > .ph > .sec-h') ||
                     panel.querySelector(':scope > div > .sec-h');
-    if (!heading) return; /* not a titled report/table panel — skip */
+    if (!heading) return; /* not a titled panel at all — skip */
+
+    /* Only panels that actually contain a real <table> get a print
+       icon — a page's outer title-only header panel (e.g. just a
+       heading + a "Back to Dashboard" button, no data of its own)
+       has nothing printable, and printing it produced a blank
+       page. If a panel's table hasn't finished loading yet (still
+       showing "Loading…"), it's simply left for the NEXT scan
+       (this panel is deliberately NOT marked done below), so the
+       icon appears automatically the moment real data renders in. */
+    if (!panel.querySelector('table')) return;
 
     panel.setAttribute('data-print-ready', '1');
     const btn = createPanelPrintButton(panel, heading);
 
-    /* Walk up from the heading looking for the nearest ancestor
-       (stopping at, and including, the panel itself) that's
-       actually laid out as a flex row — this is the panel's real
-       "header row", whatever wrapper class (or lack of one) it
-       uses. */
-    let headerRow = null;
-    let node = heading.parentElement;
-    while (node) {
-      if (getComputedStyle(node).display.indexOf('flex') !== -1) { headerRow = node; break; }
-      if (node === panel) break;
-      node = node.parentElement;
+    /* Find the panel's own top structural block (whatever directly
+       contains/IS the header — a .ph row with the title+search
+       box together, a plain title div, etc.) by walking up from
+       the heading until reaching a direct child of the panel. */
+    let topBlock = heading;
+    while (topBlock.parentElement && topBlock.parentElement !== panel) {
+      topBlock = topBlock.parentElement;
     }
 
-    if (headerRow) {
-      /* Identify which direct child of the header row the heading
-         itself belongs to (could be the row directly, or one
-         wrapper div deep), then find whichever OTHER direct child
-         is already sitting on the right (a "Back to Dashboard"
-         button, a search box, a Reset/Refresh control, a
-         count/total badge, etc.). */
-      let headingBranch = heading;
-      while (headingBranch.parentElement !== headerRow && headingBranch.parentElement) {
-        headingBranch = headingBranch.parentElement;
-      }
+    /* Insert the print icon in its own small right-aligned row
+       placed directly ABOVE that entire header block (so it sits
+       above the title AND above any search bar/filter controls
+       next to it) — inside this SAME panel, never the outer one. */
+    const printRow = document.createElement('div');
+    printRow.className = 'no-print';
+    printRow.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:8px;';
+    printRow.appendChild(btn);
+    panel.insertBefore(printRow, topBlock);
+  });
+}
 
-      let rightContainer = null;
-      Array.prototype.forEach.call(headerRow.children, function(child) {
-        if (child !== headingBranch) rightContainer = child;
-      });
+/* Some click-to-expand detail panels don't fit the generic
+   scanner above at all — either they aren't marked with the
+   `.panel` class (This Month Sale / Total Sale YTD / Sale Trend /
+   Active Leads detail blocks are plain styled divs), or they ARE
+   `.panel` elements but have NO heading of their own inside them
+   (Inventory - Item Wise / PO In-hand — their title only exists
+   on the OUTER toggle button, not inside the panel that actually
+   holds the table). Both cases are handled here explicitly, by
+   element ID, with the correct title supplied directly — using
+   the exact same "row above the content" placement and the same
+   print button/window used everywhere else in the dashboard. */
+function injectExplicitPrintTargets() {
+  var targets = [
+    { id: 'thisMonthSaleDetail', title: 'This Month Sale — Model-wise Breakdown' },
+    { id: 'totalSaleYtdDetail',  title: 'Total Sale YTD — Transaction Detail' },
+    { id: 'saleTrendDetail',     title: 'Sale Trend (Product Wise)' },
+    { id: 'activeLeadsDetail',   title: 'Active Leads — RSM-wise & Stage-wise Breakdown' },
+    { id: 'mjInventoryPanel',    title: 'Inventory - Item Wise' },
+    { id: 'mjPoInHandPanel',     title: 'PO In-hand' }
+  ];
 
-      if (rightContainer) {
-        btn.style.marginLeft = '10px';
-        /* Buttons/links can't safely contain another <button> as a
-           child (invalid nesting, unpredictable browser parsing) —
-           in that case place the print icon right beside it as a
-           sibling instead of inside it. */
-        const tag = rightContainer.tagName;
-        if (tag === 'BUTTON' || tag === 'A') {
-          rightContainer.insertAdjacentElement('afterend', btn);
-        } else {
-          if (getComputedStyle(rightContainer).display.indexOf('flex') === -1) {
-            rightContainer.style.display = 'inline-flex';
-            rightContainer.style.alignItems = 'center';
-          }
-          rightContainer.appendChild(btn);
-        }
-      } else {
-        headerRow.appendChild(btn);
-      }
-    } else {
-      /* No flex header row anywhere between the heading and the
-         panel — just a plain block-level title with no existing
-         right-side content to collide with, so the print icon is
-         pinned directly to the panel's own top-right corner. */
-      if (getComputedStyle(panel).position === 'static') {
-        panel.style.position = 'relative';
-      }
-      btn.style.position = 'absolute';
-      btn.style.top = '16px';
-      btn.style.right = '18px';
-      btn.style.zIndex = '5';
-      panel.appendChild(btn);
-    }
+  targets.forEach(function(t) {
+    const el = document.getElementById(t.id);
+    if (!el || el.hasAttribute('data-print-ready')) return;
+
+    /* Same "must actually contain a table" rule as the generic
+       scanner — a still-"Loading…" panel is skipped for now and
+       automatically picked up on the next scan once its real
+       data/table has rendered in. */
+    if (!el.querySelector('table')) return;
+
+    el.setAttribute('data-print-ready', '1');
+    const btn = createPanelPrintButton(el, { textContent: t.title });
+
+    const printRow = document.createElement('div');
+    printRow.className = 'no-print';
+    printRow.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:8px;';
+    printRow.appendChild(btn);
+    el.insertBefore(printRow, el.firstChild);
   });
 }
 
@@ -6728,11 +6735,15 @@ function injectPrintButtons() {
    slightly so rapid DOM updates (typing in a search box, filter
    re-renders) don't trigger a wasteful burst of re-scans. */
 injectPrintButtons();
+injectExplicitPrintTargets();
 
 let _printButtonScanTimer = null;
 const printButtonObserver = new MutationObserver(function() {
   clearTimeout(_printButtonScanTimer);
-  _printButtonScanTimer = setTimeout(injectPrintButtons, 150);
+  _printButtonScanTimer = setTimeout(function() {
+    injectPrintButtons();
+    injectExplicitPrintTargets();
+  }, 150);
 });
 printButtonObserver.observe(document.body, { childList: true, subtree: true });
 
