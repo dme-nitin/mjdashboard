@@ -350,6 +350,14 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(sedData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Sales Executive Wise Unique Customers (Last 6 Months) —
+     used by the frontend's JSONP fallback path. ── */
+  if (section === "salesExecutiveUniqueCustomersTrend") {
+    var sucData = getSalesExecutiveUniqueCustomersTrend();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(sucData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(sucData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Direct test: visit [url]?section=debugSalesExecDetail to
      see the RAW Report!EZ:FL values (with their JS typeof) plus
      what isTruthyCheckbox() decides for each product cell — use
@@ -3141,6 +3149,123 @@ function getUniqueAddedThisMonthReport() {
    Returns: { "email@x.com": count, ... } (This Month version)
    or        { counts: {...}, weekStart, weekEnd } (This Week version)
 ══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   getSalesExecutiveUniqueCustomersTrend()
+   Powers the "RSM Wise Last 6 Months Demo Trend" section (sub-
+   heading "Sales Executive Wise Unique Customers") in the Sales
+   section — a spreadsheet-style grid: one row per Sales
+   Executive, one column per each of the last 6 months
+   (chronological, oldest → current), showing that executive's
+   UNIQUE hospital count for that month.
+
+   Source: Report!DD:DG (4 cols, DD = col 108) — same range/
+   columns already used elsewhere in this file for Unique Added:
+     DD (col 108) = Sales Executive ID (email)
+     DE (col 109) = Hospital Name
+     DF (col 110) = City (not used here)
+     DG (col 111) = Date of Visit
+
+   Months: the last 6 CALENDAR months INCLUDING the current one,
+   computed fresh from the server's current date every call — so
+   as soon as the month rolls over, the whole 6-month window
+   shifts forward automatically (e.g. today Mar→Aug, next month
+   becomes Apr→Sep) — never hardcoded.
+
+   Logic:
+   - Every Sales Executive in the existing SALES_EXECUTIVES
+     directory gets a row (so the grid is always complete, 0s
+     shown for months with no visits — matching a plain
+     spreadsheet-style layout rather than only listing executives
+     who happened to have activity).
+   - For each DD:DG row within the 6-month window, the executive's
+     UNIQUE hospital names (case-insensitive) are counted per
+     month — a hospital visited twice by the same executive in the
+     same month counts once.
+   - Rows ordered by RSM_HIERARCHY_ORDER, then alphabetically by
+     name within each RSM — same convention used elsewhere.
+
+   Returns:
+     {
+       months: [ "Mar", "Apr", "May", "Jun", "Jul", "Aug" ],
+       executives: [ { name, rsm, counts: [n1, n2, n3, n4, n5, n6] }, ... ]
+     }
+     (counts is index-aligned with `months`)
+══════════════════════════════════════════════════ */
+function getSalesExecutiveUniqueCustomersTrend() {
+  var MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var today = new Date();
+
+  /* Build the rolling 6-month window: current month + 5 prior,
+     oldest first. */
+  var months = []; /* [{ year, month(0-11), label }] */
+  for (var k = 5; k >= 0; k--) {
+    var d = new Date(today.getFullYear(), today.getMonth() - k, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: MONTH_NAMES[d.getMonth()] });
+  }
+
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+
+  /* email -> { "year-month": { hospitalLower: true } } */
+  var execMonthSets = {};
+
+  if (rep) {
+    var lastRow = rep.getLastRow();
+    if (lastRow >= 2) {
+      /* DD=108, 4 cols through DG=111 */
+      var data = rep.getRange(2, 108, lastRow - 1, 4).getValues();
+
+      data.forEach(function(r) {
+        var email    = String(r[0] || "").trim().toLowerCase(); /* DD */
+        var hospital = String(r[1] || "").trim(); /* DE */
+        var visitRaw = r[3]; /* DG */
+
+        if (!email || !hospital) return;
+
+        var visitDate = parseSheetTimestamp(visitRaw);
+        if (!visitDate) return; /* invalid/blank date → skip */
+
+        var inWindow = months.some(function(mo) {
+          return mo.year === visitDate.getFullYear() && mo.month === visitDate.getMonth();
+        });
+        if (!inWindow) return;
+
+        var key = visitDate.getFullYear() + "-" + visitDate.getMonth();
+        if (!execMonthSets[email]) execMonthSets[email] = {};
+        if (!execMonthSets[email][key]) execMonthSets[email][key] = {};
+        execMonthSets[email][key][hospital.toLowerCase()] = true;
+      });
+    }
+  }
+
+  /* One row per known Sales Executive, ordered by the existing
+     RSM hierarchy, then alphabetically by name within each RSM —
+     same convention used everywhere else in this file. */
+  var rows = SALES_EXECUTIVES.slice().sort(function(a, b) {
+    var ra = RSM_HIERARCHY_ORDER.indexOf(a.rsm);
+    var rb = RSM_HIERARCHY_ORDER.indexOf(b.rsm);
+    if (ra === -1) ra = RSM_HIERARCHY_ORDER.length;
+    if (rb === -1) rb = RSM_HIERARCHY_ORDER.length;
+    if (ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name);
+  }).map(function(ex) {
+    var emailLower = String(ex.email || "").trim().toLowerCase();
+    var monthSets = execMonthSets[emailLower] || {};
+    var counts = months.map(function(mo) {
+      var key = mo.year + "-" + mo.month;
+      var set = monthSets[key];
+      return set ? Object.keys(set).length : 0;
+    });
+    return { name: ex.name, rsm: ex.rsm, counts: counts };
+  });
+
+  return {
+    months: months.map(function(mo) { return mo.label; }),
+    executives: rows
+  };
+}
+
+
 function getDemoDoneActivityThisMonth() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
