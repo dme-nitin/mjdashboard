@@ -829,6 +829,16 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
     <div id="demoTrendTbl"></div>
   </div>
 
+  <div class="panel" style="margin-top:16px;">
+    <div class="ph">
+      <div class="sec-h" style="margin:0;">Sales Executive Wise Unique Customers Trend</div>
+    </div>
+    <div class="sec-sub" style="margin:-10px 0 14px;">Last 6 Months (Report!DD:DG)</div>
+    <div id="salesExecUniqueCustomersTrendTbl" style="overflow-x:auto;">
+      <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="ph">
       <div class="sec-h">Product Wise Expected Sale This Month</div>
@@ -3287,6 +3297,7 @@ let overdue6PlusLoaded      = false;
 let overBudgetLoaded        = false;
 let inventoryItemWiseLoaded = false;
 let monthlyCashflowLoaded   = false;
+let salesExecUniqueCustomersTrendLoaded = false;
 
 /* ══════════════════════════════════════════════════
    MJ button — structural clone of the Accounts/HR/Prospective
@@ -3421,6 +3432,89 @@ function hideSalesSection() {
   const sec = document.getElementById('sales-section');
   if (sec) sec.style.display = 'none';
   salesSectionOpen = false;
+}
+
+/* ══════════════════════════════════════════════════
+   RSM Wise Last 6 Months Demo Trend — "Sales Executive Wise
+   Unique Customers" — fetch + render.
+   Data comes from getSalesExecutiveUniqueCustomersTrend()
+   (Report!DD:DG), already computed server-side into a rolling
+   6-month window (oldest → current, shifts automatically as the
+   month changes) and per-executive UNIQUE hospital counts.
+══════════════════════════════════════════════════ */
+function fetchSalesExecutiveUniqueCustomersTrend() {
+  const el = document.getElementById('salesExecUniqueCustomersTrendTbl');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>';
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(function(data) { salesExecUniqueCustomersTrendLoaded = true; renderSalesExecutiveUniqueCustomersTrend(data); })
+      .withFailureHandler(function(err) {
+        console.error('[GM] getSalesExecutiveUniqueCustomersTrend error:', err);
+        if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Could not load: ' + (err.message || err) + '</div>';
+      })
+      .getSalesExecutiveUniqueCustomersTrend();
+  } else {
+    /* JSONP fallback — same pattern used elsewhere in this file */
+    const old = document.getElementById('__gm_sect_j');
+    if (old) old.remove();
+    const cb = '__gmsectcb' + Date.now();
+    window[cb] = function(data) { cleanup(); salesExecUniqueCustomersTrendLoaded = true; renderSalesExecutiveUniqueCustomersTrend(data); };
+    const timer = setTimeout(function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Timeout loading data.</div>';
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      const s = document.getElementById('__gm_sect_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    const s = document.createElement('script');
+    s.id  = '__gm_sect_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=salesExecutiveUniqueCustomersTrend&_=' + Date.now();
+    s.onerror = function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Network error loading data.</div>';
+    };
+    document.head.appendChild(s);
+  }
+}
+
+function renderSalesExecutiveUniqueCustomersTrend(data) {
+  const el = document.getElementById('salesExecUniqueCustomersTrendTbl');
+  if (!el) return;
+
+  const months = (data && Array.isArray(data.months)) ? data.months : [];
+  const executives = (data && Array.isArray(data.executives)) ? data.executives : [];
+
+  if (!executives.length) {
+    el.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No data available.</div>';
+    return;
+  }
+
+  const headerCells = months.map(function(m) {
+    return '<th style="text-align:center;min-width:72px;padding:8px 16px;">' + m + '</th>';
+  }).join('');
+
+  const bodyRows = executives.map(function(ex) {
+    const countCells = ex.counts.map(function(c) {
+      return '<td style="text-align:center;min-width:72px;padding:8px 16px;font-family:\'IBM Plex Mono\',monospace;">' + (c || 0) + '</td>';
+    }).join('');
+    return '<tr>' +
+      '<td style="font-weight:500;white-space:nowrap;padding-right:20px;">' + (ex.name || '—') + '</td>' +
+      countCells +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="compact-table" style="min-width:600px;table-layout:auto;">' +
+      '<thead><tr>' +
+        '<th style="text-align:left;">Sales Executive Name</th>' +
+        headerCells +
+      '</tr></thead>' +
+      '<tbody>' + bodyRows + '</tbody>' +
+    '</table>';
 }
 
 function toggleAccountsSection() {
@@ -6164,6 +6258,11 @@ registerRefreshHook(function refreshSaleTrendOnDemand() {
   if (totalSaleYtdExpanded) fetchSaleTrendProductWise();
 });
 
+registerRefreshHook(function refreshSalesExecUniqueCustomersTrendOnDemand() {
+  salesExecUniqueCustomersTrendLoaded = false;
+  fetchSalesExecutiveUniqueCustomersTrend();
+});
+
 /* ══════════════════════════════════════════════════
    SALES EXECUTIVE DROPDOWN + DETAIL VIEW (SPA-style,
    no page reload — same header stays mounted throughout)
@@ -6437,6 +6536,7 @@ try { renderProductsYtd(cPY); } catch(e) { console.error('[GM] renderProductsYtd
 try { renderForecast(cForecastData, cPriceForecastMap); } catch(e) { console.error('[GM] renderForecast boot error:', e); }
 try { renderRsmForecast(cRsmMonthPipeline); } catch(e) { console.error('[GM] renderRsmForecast boot error:', e); }
 try { renderDemoTrend(cDemoTrend); } catch(e) { console.error('[GM] renderDemoTrend boot error:', e); }
+try { fetchSalesExecutiveUniqueCustomersTrend(); } catch(e) { console.error('[GM] fetchSalesExecutiveUniqueCustomersTrend boot error:', e); }
 hideSalesExecSection(); /* never shown in RSM/main dashboard view */
 setBadge('seed');
 
