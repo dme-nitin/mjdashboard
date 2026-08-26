@@ -2210,15 +2210,24 @@ function getSaleTrendProductWise() {
      FR (col 174) = Product
      FS (col 175) = Quantity
      FT (col 176) = Amount           ← the value summed
-     FU (col 177) = (unused / reserved for future use)
+     FU (col 177) = Invoice No       ← "in hand" filter column
 
    Logic:
-   - Every row with a non-blank Hospital Name (FQ) is included —
-     no date/month filter (mirrors Inventory - Item Wise, which
-     also has no date filter). Rows with a zero/blank Amount are
-     still included (so nothing silently disappears) — only rows
-     with literally no Hospital Name at all are skipped.
-   - total = sum of Amount (FT) across all included rows.
+   - A PO only counts as "in hand" while its Invoice No (FU) is
+     BLANK — meaning no invoice has been raised for it yet. The
+     moment someone fills in an Invoice No for a row, that row
+     automatically disappears from PO In-hand on the very next
+     load/refresh (it's no longer outstanding). No manual removal
+     needed anywhere — this is a live filter re-evaluated from the
+     sheet every time the panel is opened or refreshed.
+   - Every row with a non-blank Hospital Name (FQ) AND a blank
+     Invoice No (FU) is included — no date/month filter (mirrors
+     Inventory - Item Wise, which also has no date filter). Rows
+     with a zero/blank Amount are still included (so nothing
+     silently disappears) — only rows with no Hospital Name, or
+     with an Invoice No already filled in, are excluded.
+   - total = sum of Amount (FT) across all included (still
+     invoice-pending) rows.
    - PO Date is formatted as "dd MMM yyyy" (e.g. "13 Jul 2026")
      server-side, so the frontend never has to deal with a raw
      JS Date/timestamp string.
@@ -2239,13 +2248,15 @@ function getPoInHand() {
   var rows  = [];
 
   data.forEach(function(r) {
-    var poDateRaw = r[0]; /* FP */
-    var hospital  = String(r[1] || "").trim(); /* FQ */
-    var product   = String(r[2] || "").trim(); /* FR */
-    var qtyRaw    = r[3]; /* FS */
-    var amountRaw = r[4]; /* FT */
+    var poDateRaw   = r[0]; /* FP */
+    var hospital    = String(r[1] || "").trim(); /* FQ */
+    var product     = String(r[2] || "").trim(); /* FR */
+    var qtyRaw      = r[3]; /* FS */
+    var amountRaw   = r[4]; /* FT */
+    var invoiceNo   = String(r[5] || "").trim(); /* FU */
 
     if (!hospital) return; /* skip fully blank rows */
+    if (invoiceNo) return; /* Invoice No already filled in → no longer "in hand", exclude */
 
     var amount = typeof amountRaw === "number" ? amountRaw
                  : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
