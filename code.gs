@@ -5215,6 +5215,48 @@ function testProductsThisMonth() {
   skippedNotThisMonthSamples.forEach(function(s) { Logger.log(s); });
 }
 
+/* ══════════════════════════════════════════════════
+   testProspectiveColumns()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run" (top toolbar), click Run, then
+   View → Logs (or Ctrl+Enter) to see the output. No URL, no
+   redeploy needed — sidesteps the exec-URL access issue entirely.
+
+   Logs the RAW Report!BJ:BP values (first 15 non-blank-Hospital
+   rows) labeled by their ASSUMED field, so we can see definitively
+   whether State really is in column BL or somewhere else.
+══════════════════════════════════════════════════ */
+function testProspectiveColumns() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  Logger.log("Last row: " + lastRow);
+
+  /* BJ=62, 7 cols through BP=68 */
+  var vals = rep.getRange(2, 62, Math.min(lastRow - 1, 300), 7).getValues();
+  Logger.log("Total rows read from BJ:BP: " + vals.length);
+
+  var shown = 0;
+  for (var i = 0; i < vals.length && shown < 15; i++) {
+    var hospital = String(vals[i][0] || "").trim();
+    if (!hospital) continue;
+    shown++;
+    Logger.log(
+      "Row " + (i + 2) +
+      ": BJ(Hospital)=[" + vals[i][0] + "]" +
+      " | BK(Product?)=[" + vals[i][1] + "]" +
+      " | BL(State?)=[" + vals[i][2] + "]" +
+      " | BM(Month?)=[" + vals[i][3] + "]" +
+      " | BN(Email?)=[" + vals[i][4] + "]" +
+      " | BO(Sale?)=[" + vals[i][5] + "]" +
+      " | BP(RSM?)=[" + vals[i][6] + "]"
+    );
+  }
+  if (shown === 0) Logger.log("No rows with a non-blank Hospital (BJ) found in the first 300 rows.");
+}
+
 function testExecutiveData() {
   Logger.log(JSON.stringify(getExecutiveDashboardData(SALES_EXECUTIVES[0].email), null, 2));
 }
