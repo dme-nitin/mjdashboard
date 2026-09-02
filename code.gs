@@ -82,6 +82,7 @@ var RSM_DIRECT_EMAILS = {
    Returns: { "email@x.com": "RsmName", ... } (lowercased keys)
 ══════════════════════════════════════════════════ */
 function buildEmailToRsmLookup() {
+  if (SALES_EXECUTIVES.length === 0) loadSalesExecutivesFromMasterList(); /* safety net — ensures the live master list is loaded even if reached outside doGet() */
   var rsmByEmail = {};
   SALES_EXECUTIVES.forEach(function(ex) {
     var e = String(ex.email || "").trim().toLowerCase();
@@ -129,44 +130,100 @@ function getCurrentWeekMonToSat() {
 
 /* ══════════════════════════════════════════════════
    SALES EXECUTIVE DIRECTORY (dropdown source of truth)
+   — NOW DYNAMIC, loaded live from Report!GM:GO every request.
 ══════════════════════════════════════════════════ */
-/* RSM hierarchy order — dropdown groups must render in exactly this order */
+/* RSM hierarchy order — dropdown groups must render in exactly this order.
+   FIXED/hardcoded on purpose — RSMs don't change, only Sales
+   Executives do (per explicit requirement, only the Sales
+   Executive directory below is made dynamic, RSM logic is
+   untouched). */
 var RSM_HIERARCHY_ORDER = ["Vijay", "Daya", "Abhishek Tiwari", "Giridharan", "Tanmoy"];
 
-var SALES_EXECUTIVES = [
-  /* ── Vijay ── */
-  {email:"amitthakurglobalmedicare@gmail.com",   name:"Amit",          rsm:"Vijay"},
-  {email:"shaneshwarglobalmedicare@gmail.com",   name:"Shaneshwar",    rsm:"Vijay"},
-  {email:"arifaltafglobalmedicare@gmail.com",    name:"Arif",          rsm:"Vijay"},
-  {email:"harunglobalmedicare@gmail.com",        name:"Harun",         rsm:"Vijay"},
-  {email:"jugaljodhpurglobalmedicare@gmail.com", name:"Jugal",         rsm:"Vijay"},
-  {email:"rajinderglobalmedicare@gmail.com",     name:"Rajinder",      rsm:"Vijay"},
-  {email:"ahamadafzalglobalmedicare@gmail.com",  name:"Afzal",         rsm:"Vijay"},
+/* Starts empty — populated by loadSalesExecutivesFromMasterList()
+   at the very top of doGet(e), before any route runs. Every other
+   function in this entire file (execNameFromEmail, rsmFromEmail,
+   buildEmailToRsmLookup, getTargetVsAchievement, the Sales
+   Executive dropdown, getSalesExecutiveUniqueCustomersTrend, etc.)
+   keeps reading this SAME variable exactly as before — none of
+   them needed to change, since they all just see whatever this
+   array currently holds. */
+var SALES_EXECUTIVES = [];
 
-  /* ── Daya ── */
-  {email:"muskanglobalmedicare@gmail.com",       name:"Muskan",        rsm:"Daya"},
-  {email:"ashrafglobalmedicare@gmail.com",       name:"Ashraf",        rsm:"Daya"},
-  {email:"ranjanglobalmedicare@gmail.com",       name:"Ranjan",        rsm:"Daya"},
-  {email:"arungloballko@gmail.com",              name:"Arun",          rsm:"Daya"},
-  {email:"pintuglobalmedicare@gmail.com",        name:"Pintu",         rsm:"Daya"},
-  {email:"pankajglobalmedicare@gmail.com",       name:"Pankaj",        rsm:"Daya"},
+/* ══════════════════════════════════════════════════
+   loadSalesExecutivesFromMasterList()
+   Reads the LIVE Sales Executive master list and (re)builds the
+   SALES_EXECUTIVES array from it — called once at the very start
+   of every doGet(e) request, before any route/section runs, so
+   every function that reads SALES_EXECUTIVES throughout this
+   entire file always sees the CURRENT sheet content.
 
-  /* ── Abhishek Tiwari ── */
-  {email:"tausifglobalmedicare@gmail.com",       name:"Tausif",        rsm:"Abhishek Tiwari"},
-  {email:"tkamlesh2018@gmail.com",               name:"Kamlesh",       rsm:"Abhishek Tiwari"},
-  {email:"gauravb.globalmedicare@gmail.com",     name:"Gaurav",        rsm:"Abhishek Tiwari"},
-  {email:"akashglobalmedicare@gmail.com",        name:"Akash Patel",   rsm:"Abhishek Tiwari"},
+   Source: Report!GM:GO (3 cols, GM = col 195)
+     GM (col 195) = Sales Executive Name
+     GN (col 196) = Sales Executive Email ID
+     GO (col 197) = RSM Name
 
-  /* ── Giridharan ── */
-  {email:"hemchandanglobalmedicare@gmail.com",   name:"Hemchandan",    rsm:"Giridharan"},
-  {email:"arunchennaiglobalmedicare@gmail.com",  name:"Arun Chennai",  rsm:"Giridharan"},
-  {email:"rajenderreddyglobalmedicare@gmail.com",name:"Rajender Reddy",rsm:"Giridharan"},
+   To add/remove a Sales Executive going forward: just add/remove
+   their row in Report!GM:GO — nothing in this code or the
+   frontend HTML ever needs to be touched again.
 
-  /* ── Tanmoy ── */
-  {email:"sudiptaglobalmedicare@gmail.com",      name:"Sudipta",       rsm:"Tanmoy"},
-  {email:"dibakarglobalmedicare@gmail.com",      name:"Dibakar",       rsm:"Tanmoy"},
-  {email:"rohitglobalmedicare@gmail.com",        name:"Rohit",         rsm:"Tanmoy"}
-];
+   Logic:
+   - Row 1 is a header row (Name / Email / RSM) and is skipped;
+     data starts at row 2.
+   - A row is skipped entirely if its Name OR Email is blank —
+     both are required to be usable anywhere in the dashboard.
+   - RSM (GO) is matched against the FIXED RSM_HIERARCHY_ORDER /
+     RSM_NAMES lists case/whitespace-insensitively (via the
+     existing canonicalRsmName() helper) — so "daya ", "DAYA",
+     "Daya" all resolve to the same canonical "Daya". If a row's
+     RSM doesn't match any known RSM at all, it's kept AS-IS
+     (never silently dropped) so the row still shows up somewhere
+     rather than disappearing without explanation — but this is
+     only ever a data-entry issue in the master list, not a code
+     issue, since RSM names themselves are fixed and unchanged.
+   - Duplicate emails: the FIRST occurrence in the sheet wins;
+     later duplicate rows for the same email are skipped.
+
+   This function does NOT touch RSM_NAMES, RSM_HIERARCHY_ORDER, or
+   RSM_DIRECT_EMAILS — those remain exactly as they were (fixed),
+   per the explicit requirement that only the Sales Executive
+   directory becomes dynamic, not the RSM list itself.
+══════════════════════════════════════════════════ */
+function loadSalesExecutivesFromMasterList() {
+  var list = [];
+  try {
+    var ss  = SpreadsheetApp.getActiveSpreadsheet();
+    var rep = ss.getSheetByName(REPORT_TAB);
+    if (!rep) { Logger.log("loadSalesExecutivesFromMasterList: sheet '" + REPORT_TAB + "' NOT FOUND"); SALES_EXECUTIVES = list; return list; }
+
+    var lastRow = rep.getLastRow();
+    if (lastRow < 2) { SALES_EXECUTIVES = list; return list; }
+
+    /* GM=195, 3 cols through GO=197. Row 1 = header, data starts row 2. */
+    var data = rep.getRange(2, 195, lastRow - 1, 3).getValues();
+    var seenEmails = {};
+
+    data.forEach(function(r) {
+      var name  = String(r[0] || "").trim(); /* GM */
+      var email = String(r[1] || "").trim(); /* GN */
+      var rsmRaw = String(r[2] || "").trim(); /* GO */
+
+      if (!name || !email) return; /* both required */
+
+      var emailLower = email.toLowerCase();
+      if (seenEmails[emailLower]) return; /* duplicate email — first occurrence wins */
+      seenEmails[emailLower] = true;
+
+      var rsm = canonicalRsmName(rsmRaw); /* matches fixed RSM list, case/whitespace-insensitive; kept as-is if unrecognized */
+
+      list.push({ email: email, name: name, rsm: rsm });
+    });
+  } catch (e) {
+    Logger.log("loadSalesExecutivesFromMasterList ERROR: " + e.message);
+  }
+
+  SALES_EXECUTIVES = list;
+  return list;
+}
 
 /* ══════════════════════════════════════════════════
    WEB APP ENTRY POINT
@@ -176,6 +233,14 @@ function doGet(e) {
   var execEmail = e && e.parameter && e.parameter.exec;
   var section   = e && e.parameter && e.parameter.section;
   var page      = e && e.parameter && e.parameter.page;
+
+  /* Load the LIVE Sales Executive directory from Report!GM:GO
+     before anything else runs — every function in this file that
+     reads SALES_EXECUTIVES (dropdown population, RSM lookups,
+     Target vs Achievement, the Unique Customers trend, etc.) then
+     automatically sees whatever is currently in the master list,
+     with zero changes needed anywhere else. */
+  loadSalesExecutivesFromMasterList();
 
   /* ── New: Accounts page — visited via ?page=accounts, opened in a new tab
      from the "Accounts" button next to the RSM filters. Separate HTML file,
@@ -716,6 +781,22 @@ function doGet(e) {
     });
     if (cb) return ContentService.createTextOutput(cb + "(" + avDbgOut + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
     return ContentService.createTextOutput(avDbgOut).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  /* ── Direct test: visit [url]?section=debugSalesExecMasterList
+     to see the LIVE Sales Executive directory as currently loaded
+     from Report!GM:GO — use this to confirm additions/removals in
+     the master list are correctly reflected (or to spot a bad RSM
+     value that didn't match any known RSM name). ── */
+  if (section === "debugSalesExecMasterList") {
+    var loadedList = loadSalesExecutivesFromMasterList();
+    var dbgMasterOut = JSON.stringify({
+      count: loadedList.length,
+      executives: loadedList,
+      knownRsmNames: RSM_NAMES
+    });
+    if (cb) return ContentService.createTextOutput(cb + "(" + dbgMasterOut + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(dbgMasterOut).setMimeType(ContentService.MimeType.JSON);
   }
 
   if (section === "debugKpiValues") {
@@ -2571,6 +2652,7 @@ function countProspectiveCustomers(email) {
 
 /* ── helper: resolve display name for an email ── */
 function execNameFromEmail(email) {
+  if (SALES_EXECUTIVES.length === 0) loadSalesExecutivesFromMasterList(); /* safety net — ensures the live master list is loaded even if reached outside doGet() */
   email = String(email || "").trim().toLowerCase();
   for (var i = 0; i < SALES_EXECUTIVES.length; i++) {
     if (SALES_EXECUTIVES[i].email.toLowerCase() === email) return SALES_EXECUTIVES[i].name;
@@ -2580,6 +2662,7 @@ function execNameFromEmail(email) {
 
 /* ── helper: resolve RSM for an email via SALES_EXECUTIVES directory ── */
 function rsmFromEmail(email) {
+  if (SALES_EXECUTIVES.length === 0) loadSalesExecutivesFromMasterList(); /* safety net */
   email = String(email || "").trim().toLowerCase();
   for (var i = 0; i < SALES_EXECUTIVES.length; i++) {
     if (SALES_EXECUTIVES[i].email.toLowerCase() === email) return SALES_EXECUTIVES[i].rsm || "Unassigned";
@@ -3063,6 +3146,7 @@ function getUniqueAddedThisWeek() {
    Returns: [ { date, hospital, city, execId, execName, rsm }, ... ]
 ══════════════════════════════════════════════════ */
 function getUniqueAddedThisMonthReport() {
+  if (SALES_EXECUTIVES.length === 0) loadSalesExecutivesFromMasterList(); /* safety net */
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
   if (!rep) return [];
@@ -3203,6 +3287,7 @@ function getUniqueAddedThisMonthReport() {
      (counts is index-aligned with `months`)
 ══════════════════════════════════════════════════ */
 function getSalesExecutiveUniqueCustomersTrend() {
+  if (SALES_EXECUTIVES.length === 0) loadSalesExecutivesFromMasterList(); /* safety net */
   var MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   var today = new Date();
 
