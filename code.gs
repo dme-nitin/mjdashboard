@@ -799,6 +799,38 @@ function doGet(e) {
     return ContentService.createTextOutput(dbgMasterOut).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Direct test: visit [url]?section=debugProspectiveColumns
+     to see the RAW Report!BJ:BP values (first 15 non-blank rows)
+     labeled by their ASSUMED field (Hospital/Product/State/Month/
+     Email/Sale/RSM) — use this to confirm State really is in
+     column BL, or to spot that it's actually somewhere else. ── */
+  if (section === "debugProspectiveColumns") {
+    var repPcDbg = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPORT_TAB);
+    var pcDbgRows = [];
+    if (repPcDbg) {
+      var lastRowPcDbg = repPcDbg.getLastRow();
+      if (lastRowPcDbg >= 2) {
+        var pcVals = repPcDbg.getRange(2, 62, Math.min(lastRowPcDbg - 1, 200), 7).getValues(); /* BJ=62, 7 cols through BP=68 */
+        for (var pi = 0; pi < pcVals.length && pcDbgRows.length < 15; pi++) {
+          if (!String(pcVals[pi][0] || "").trim()) continue; /* skip blank Hospital rows */
+          pcDbgRows.push({
+            row: pi + 2,
+            BJ_assumedHospital: pcVals[pi][0],
+            BK_assumedProduct: pcVals[pi][1],
+            BL_assumedState: pcVals[pi][2],
+            BM_assumedMonth: pcVals[pi][3],
+            BN_assumedEmail: pcVals[pi][4],
+            BO_assumedSale: pcVals[pi][5],
+            BP_assumedRsm: pcVals[pi][6]
+          });
+        }
+      }
+    }
+    var pcDbgOut = JSON.stringify({ rows: pcDbgRows });
+    if (cb) return ContentService.createTextOutput(cb + "(" + pcDbgOut + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(pcDbgOut).setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (section === "debugKpiValues") {
     var dbgBank = getCurrentBankData();
     var dbgMonthly = getMonthlyPayments();
