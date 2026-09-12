@@ -332,6 +332,14 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(arData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Analysis section (7 graphs) — used by the frontend's JSONP
+     fallback path. Same data as getAnalysisData(). ── */
+  if (section === "analysisData") {
+    var anData = getAnalysisData();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(anData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(anData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Expected Payment Receive This Month — used by the frontend's JSONP
      fallback path. Same data as getMonthlyPayments(), just JSONP-wrapped. ── */
   if (section === "monthlyPayments") {
@@ -1414,6 +1422,273 @@ function getAccountsReceivable() {
 
   return { rows: rows, total: Math.round(total) };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ANALYSIS SECTION — 7 graphs, powers the "Analysis" button/page.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Fixed reference list of Indian state/UT names — used ONLY to
+   tell whether a location value already IS a state (Graphs 5/6),
+   not sheet-derived data. */
+var INDIAN_STATES = [
+  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
+  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
+  "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab",
+  "Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh",
+  "Uttarakhand","West Bengal","Andaman and Nicobar Islands","Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu","Delhi","Jammu and Kashmir","Ladakh",
+  "Lakshadweep","Puducherry","NCR","National Capital Region"
+];
+
+/* Fixed reference city → state lookup (major Indian cities). Used
+   to resolve City Name to its State for Graph 3 (State Wise
+   Prospective) and Graph 5 (State Wise Top 10 Sale). This is
+   geographic reference data (not sheet-specific business data),
+   so it's reasonable to keep as a constant rather than sourcing
+   it from the sheet. Any city NOT in this list falls back to an
+   explicit "Unknown" bucket (never silently mis-assigned to a
+   wrong state — see requirement #14). */
+var CITY_TO_STATE = {
+  "mumbai":"Maharashtra","pune":"Maharashtra","nagpur":"Maharashtra","nashik":"Maharashtra",
+  "thane":"Maharashtra","aurangabad":"Maharashtra","kolhapur":"Maharashtra","solapur":"Maharashtra",
+  "navi mumbai":"Maharashtra","vasai":"Maharashtra","pimpri":"Maharashtra","pimpri-chinchwad":"Maharashtra",
+  "delhi":"Delhi","new delhi":"Delhi",
+  "bangalore":"Karnataka","bengaluru":"Karnataka","mysore":"Karnataka","mysuru":"Karnataka",
+  "hubli":"Karnataka","mangalore":"Karnataka","belgaum":"Karnataka",
+  "chennai":"Tamil Nadu","coimbatore":"Tamil Nadu","madurai":"Tamil Nadu","trichy":"Tamil Nadu",
+  "tiruchirapalli":"Tamil Nadu","salem":"Tamil Nadu","erode":"Tamil Nadu","vellore":"Tamil Nadu",
+  "hyderabad":"Telangana","warangal":"Telangana","secunderabad":"Telangana",
+  "kolkata":"West Bengal","howrah":"West Bengal","siliguri":"West Bengal","durgapur":"West Bengal","asansol":"West Bengal",
+  "ahmedabad":"Gujarat","surat":"Gujarat","vadodara":"Gujarat","rajkot":"Gujarat","gandhinagar":"Gujarat","bhavnagar":"Gujarat",
+  "jaipur":"Rajasthan","jodhpur":"Rajasthan","udaipur":"Rajasthan","kota":"Rajasthan","ajmer":"Rajasthan","bikaner":"Rajasthan",
+  "lucknow":"Uttar Pradesh","kanpur":"Uttar Pradesh","varanasi":"Uttar Pradesh","agra":"Uttar Pradesh",
+  "allahabad":"Uttar Pradesh","prayagraj":"Uttar Pradesh","noida":"Uttar Pradesh","ghaziabad":"Uttar Pradesh",
+  "meerut":"Uttar Pradesh","bareilly":"Uttar Pradesh","aligarh":"Uttar Pradesh","moradabad":"Uttar Pradesh",
+  "gorakhpur":"Uttar Pradesh","greater noida":"Uttar Pradesh",
+  "patna":"Bihar","gaya":"Bihar","muzaffarpur":"Bihar","bhagalpur":"Bihar",
+  "bhopal":"Madhya Pradesh","indore":"Madhya Pradesh","gwalior":"Madhya Pradesh","jabalpur":"Madhya Pradesh","ujjain":"Madhya Pradesh",
+  "chandigarh":"Chandigarh",
+  "amritsar":"Punjab","ludhiana":"Punjab","jalandhar":"Punjab","patiala":"Punjab","mohali":"Punjab","bathinda":"Punjab",
+  "gurgaon":"Haryana","gurugram":"Haryana","faridabad":"Haryana","panipat":"Haryana","hisar":"Haryana",
+  "karnal":"Haryana","rohtak":"Haryana","ambala":"Haryana",
+  "bhubaneswar":"Odisha","cuttack":"Odisha","rourkela":"Odisha",
+  "guwahati":"Assam","dibrugarh":"Assam","silchar":"Assam",
+  "ranchi":"Jharkhand","jamshedpur":"Jharkhand","dhanbad":"Jharkhand","bokaro":"Jharkhand",
+  "raipur":"Chhattisgarh","bhilai":"Chhattisgarh","bilaspur":"Chhattisgarh",
+  "thiruvananthapuram":"Kerala","trivandrum":"Kerala","kochi":"Kerala","cochin":"Kerala",
+  "kozhikode":"Kerala","calicut":"Kerala","thrissur":"Kerala","kollam":"Kerala",
+  "dehradun":"Uttarakhand","haridwar":"Uttarakhand","rishikesh":"Uttarakhand","roorkee":"Uttarakhand",
+  "shimla":"Himachal Pradesh","manali":"Himachal Pradesh",
+  "srinagar":"Jammu and Kashmir","jammu":"Jammu and Kashmir",
+  "panaji":"Goa","panjim":"Goa","margao":"Goa",
+  "guntur":"Andhra Pradesh","vijayawada":"Andhra Pradesh","visakhapatnam":"Andhra Pradesh",
+  "vizag":"Andhra Pradesh","tirupati":"Andhra Pradesh","nellore":"Andhra Pradesh",
+  "imphal":"Manipur","shillong":"Meghalaya","aizawl":"Mizoram","kohima":"Nagaland",
+  "itanagar":"Arunachal Pradesh","gangtok":"Sikkim","agartala":"Tripura",
+  "puducherry":"Puducherry","pondicherry":"Puducherry"
+};
+
+/* Resolves an ES/BU-style location string to its State, using
+   INDIAN_STATES (direct match) then CITY_TO_STATE (city lookup).
+   Returns { type: "state"|"city"|"unknown", state, city }. Never
+   guesses — an unrecognized value is explicitly "unknown" so it
+   can be bucketed separately instead of silently mis-assigned. */
+function resolveIndianLocation(raw) {
+  var trimmed = String(raw || "").trim();
+  if (!trimmed) return { type: "unknown", state: null, city: null };
+  var lower = trimmed.toLowerCase();
+
+  for (var i = 0; i < INDIAN_STATES.length; i++) {
+    if (INDIAN_STATES[i].toLowerCase() === lower) {
+      return { type: "state", state: INDIAN_STATES[i], city: null };
+    }
+  }
+  if (CITY_TO_STATE[lower]) {
+    return { type: "city", state: CITY_TO_STATE[lower], city: trimmed };
+  }
+  return { type: "unknown", state: null, city: null };
+}
+
+/* Simple top-N-by-value helper shared by every graph below. */
+function topNFromMap(map, n) {
+  return Object.keys(map)
+    .map(function(k) { return { label: map[k].label || k, value: Math.round(map[k].value) }; })
+    .sort(function(a, b) { return b.value - a.value; })
+    .slice(0, n);
+}
+
+/* ══════════════════════════════════════════════════
+   getAnalysisData()
+   Powers the entire "Analysis" section — all 7 graphs computed
+   together in one call (each independent, none affect the
+   others), reusing the SAME live-sheet-read approach used
+   everywhere else in this file (SpreadsheetApp.getRange(...)
+   .getValues(), parseSheetTimestamp() for dates) — no separate
+   data-fetch mechanism, no caching, always live.
+
+   Returns:
+     {
+       topCustomersThisMonth   : [ { label, value }, ... ]  (Graph 1)
+       topCustomersThisYear    : [ { label, value }, ... ]  (Graph 2)
+       stateWiseProspective    : [ { label, value }, ... ]  (Graph 3)
+       cityWiseProspective     : [ { label, value }, ... ]  (Graph 4)
+       stateWiseTopSale        : [ { label, value }, ... ]  (Graph 5)
+       cityWiseTopSale         : [ { label, value }, ... ]  (Graph 6)
+       topCustomersBySale      : [ { label, value }, ... ]  (Graph 7)
+     }
+══════════════════════════════════════════════════ */
+function getAnalysisData() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  var empty = {
+    topCustomersThisMonth: [], topCustomersThisYear: [],
+    stateWiseProspective: [], cityWiseProspective: [],
+    stateWiseTopSale: [], cityWiseTopSale: [], topCustomersBySale: []
+  };
+  if (!rep) return empty;
+
+  var lastRow = rep.getLastRow();
+  if (lastRow < 2) return empty;
+
+  var today    = new Date();
+  var curMonth = today.getMonth();
+
+  /* ── Graphs 1 & 2: Report!GQ:HA (11 cols, GQ = col 199) ──
+     GR (col 200, index 1) = Hospital/Customer Name
+     GV (col 204, index 5) = Amount
+     HA (col 209, index 10) = Month — CONFIRMED via
+       testAnalysisGqHa() Execution Log output to be a BARE MONTH
+       NAME/abbreviation ("Oct", "Sep", "Nov"...), NOT a full date
+       with day+year. parseSheetTimestamp() was failing on every
+       single row here (it expects a real date), which is exactly
+       why both graphs were blank. Now normalized the same way the
+       "Expected Sale Month" columns elsewhere in this file already
+       are, via the shared normMonthName() helper.
+
+       Since there's no year in this column, "This Month" = HA
+       matches the current calendar month's name; "This Year" =
+       every OTHER recognized month name (there's no way to
+       separate "prior FY year" data without a year value, so
+       every non-current-month row with a valid month name is
+       treated as belonging to the current cycle). */
+  var topCustomersThisMonthMap = {};
+  var topCustomersThisYearMap  = {};
+  try {
+    var curMonthAbbr = MONTH3[curMonth]; /* e.g. "Sep" */
+    var gqData = rep.getRange(2, 199, lastRow - 1, 11).getValues();
+    gqData.forEach(function(r) {
+      var hospital  = String(r[1] || "").trim();  /* GR */
+      var amountRaw = r[5];                        /* GV */
+      var monthRaw  = r[10];                        /* HA */
+
+      if (!hospital) return;
+      var monthAbbr = normMonthName(monthRaw);
+      if (!monthAbbr || MONTH3.indexOf(monthAbbr) === -1) return; /* blank or unrecognized month text → skip */
+
+      var amount = typeof amountRaw === "number" ? amountRaw
+                   : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+      if (amount === 0) return;
+
+      var key = hospital.toLowerCase();
+      if (monthAbbr === curMonthAbbr) {
+        if (!topCustomersThisMonthMap[key]) topCustomersThisMonthMap[key] = { label: hospital, value: 0 };
+        topCustomersThisMonthMap[key].value += amount;
+      } else {
+        if (!topCustomersThisYearMap[key]) topCustomersThisYearMap[key] = { label: hospital, value: 0 };
+        topCustomersThisYearMap[key].value += amount;
+      }
+    });
+  } catch (e) { Logger.log("getAnalysisData GQ:HA ERROR: " + e.message); }
+
+  /* ── Graphs 3 & 4: Report!BR:BW (6 cols, BR = col 70) — SAME
+     range already used by getExecutiveData()/getProspectiveCustomersData()
+     elsewhere in this file:
+       BT (col 72, index 2) = Hospital Name (not used here)
+       BU (col 73, index 3) = City Name — the field these 2 graphs group by */
+  var stateWiseProspectiveMap = {};
+  var cityWiseProspectiveMap  = {};
+  try {
+    var brData = rep.getRange(2, 70, lastRow - 1, 6).getValues();
+    brData.forEach(function(r) {
+      var city = String(r[3] || "").trim(); /* BU */
+      if (!city) return;
+
+      var cityKey = city.toLowerCase();
+      if (!cityWiseProspectiveMap[cityKey]) cityWiseProspectiveMap[cityKey] = { label: city, value: 0 };
+      cityWiseProspectiveMap[cityKey].value += 1;
+
+      var loc = resolveIndianLocation(city);
+      var stateLabel = (loc.type === "city") ? loc.state : "Unknown";
+      var stateKey = stateLabel.toLowerCase();
+      if (!stateWiseProspectiveMap[stateKey]) stateWiseProspectiveMap[stateKey] = { label: stateLabel, value: 0 };
+      stateWiseProspectiveMap[stateKey].value += 1;
+    });
+  } catch (e) { Logger.log("getAnalysisData BR:BW ERROR: " + e.message); }
+
+  /* ── Graphs 5, 6 & 7: Report!EQ:EX (8 cols, EQ = col 147) — SAME
+     range already used by getThisMonthSale()/getTotalSaleYtdRows()
+     elsewhere in this file:
+       ER (col 148, index 1) = Customer Name
+       ES (col 149, index 2) = State OR City (mixed — resolved below)
+       ET (col 150, index 3) = Amount W/O GST — the value summed */
+  var stateWiseTopSaleMap  = {};
+  var cityWiseTopSaleMap   = {};
+  var topCustomersBySaleMap = {};
+  try {
+    var eqData = rep.getRange(2, 147, lastRow - 1, 8).getValues();
+    eqData.forEach(function(r) {
+      var customer  = String(r[1] || "").trim(); /* ER */
+      var esValue   = String(r[2] || "").trim(); /* ES */
+      var amountRaw = r[3];                       /* ET */
+
+      var amount = typeof amountRaw === "number" ? amountRaw
+                   : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+      if (amount === 0) return;
+
+      /* Graph 7 — Top 10 Customers by total Sale Amount */
+      if (customer) {
+        var custKey = customer.toLowerCase();
+        if (!topCustomersBySaleMap[custKey]) topCustomersBySaleMap[custKey] = { label: customer, value: 0 };
+        topCustomersBySaleMap[custKey].value += amount;
+      }
+
+      if (!esValue) return;
+      var loc = resolveIndianLocation(esValue);
+
+      /* Graph 5 — State Wise Top 10 Sale: ES already a state → use
+         directly; ES a recognized city → resolve to ITS state;
+         unrecognized → bucketed under "Unknown" (restored — fully
+         excluding these caused too large a mismatch against the
+         real total sale amount). */
+      var stateLabel5 = loc.type === "state" ? loc.state
+                          : loc.type === "city" ? loc.state
+                          : "Unknown";
+      var stateKey5 = stateLabel5.toLowerCase();
+      if (!stateWiseTopSaleMap[stateKey5]) stateWiseTopSaleMap[stateKey5] = { label: stateLabel5, value: 0 };
+      stateWiseTopSaleMap[stateKey5].value += amount;
+
+      /* Graph 6 — City Wise Top 10 Sale: ONLY rows where ES is a
+         recognized CITY are included; rows where ES is a state (or
+         unrecognized) are excluded entirely, per requirement. */
+      if (loc.type === "city") {
+        var cityKey = esValue.toLowerCase();
+        if (!cityWiseTopSaleMap[cityKey]) cityWiseTopSaleMap[cityKey] = { label: esValue, value: 0 };
+        cityWiseTopSaleMap[cityKey].value += amount;
+      }
+    });
+  } catch (e) { Logger.log("getAnalysisData EQ:EX ERROR: " + e.message); }
+
+  return {
+    topCustomersThisMonth : topNFromMap(topCustomersThisMonthMap, 10),
+    topCustomersThisYear  : topNFromMap(topCustomersThisYearMap, 10),
+    stateWiseProspective  : topNFromMap(stateWiseProspectiveMap, 999), /* all states, not just top 10 (graph shows every state) */
+    cityWiseProspective   : topNFromMap(cityWiseProspectiveMap, 999),  /* all cities */
+    stateWiseTopSale      : topNFromMap(stateWiseTopSaleMap, 10),
+    cityWiseTopSale       : topNFromMap(cityWiseTopSaleMap, 10),
+    topCustomersBySale    : topNFromMap(topCustomersBySaleMap, 10)
+  };
+}
+
 
 /* ══════════════════════════════════════════════════
    getMonthlyPayments()
@@ -4193,6 +4468,34 @@ function canonicalRsmName(raw) {
 }
 
 /* ══════════════════════════════════════════════════
+   normMonthName(raw)
+   Shared, top-level month-name normalizer — handles cells that
+   are JUST a bare month name/abbreviation (no day, no year), e.g.
+   "Sep", "September", a real Date object, etc. Normalizes to the
+   canonical 3-letter form ("Jan".."Dec"). Originally a function
+   nested inside getDashboardData() (used for the "Expected Sale
+   Month" columns) — promoted to top-level so getAnalysisData()
+   (Report!GQ:HA's HA column, which is ALSO just a bare month
+   name, not a full date) can reuse the exact same logic instead
+   of duplicating it.
+══════════════════════════════════════════════════ */
+var MONTH3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function normMonthName(raw) {
+  if (!raw) return "";
+  if (raw instanceof Date) return MONTH3[raw.getMonth()];
+  var s = String(raw).trim();
+  if (!s) return "";
+  var sl = s.toLowerCase();
+  for (var mi = 0; mi < MONTH3.length; mi++) {
+    var m3 = MONTH3[mi].toLowerCase();
+    var mFull = ["january","february","march","april","may","june",
+                 "july","august","september","october","november","december"][mi];
+    if (sl === m3 || sl === mFull || sl.slice(0,3) === m3) return MONTH3[mi];
+  }
+  return s;
+}
+
+/* ══════════════════════════════════════════════════
    computeDemoTrend()  — HARDENED (v21)
    Reads Report!T:W independently.
    T (col 20) = Timestamp  →  extracts YYYY-MM month key
@@ -4637,21 +4940,10 @@ function getDashboardData(forceRefresh) {
   /* ══════════════════════════════════════════════
      10. PRODUCT MONTHLY FORECAST  Report!BJ:BO
   ══════════════════════════════════════════════ */
-  var MONTH3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  function normMonth(raw) {
-    if (!raw) return "";
-    if (raw instanceof Date) return MONTH3[raw.getMonth()];
-    var s = String(raw).trim();
-    if (!s) return "";
-    var sl = s.toLowerCase();
-    for (var mi = 0; mi < MONTH3.length; mi++) {
-      var m3 = MONTH3[mi].toLowerCase();
-      var mFull = ["january","february","march","april","may","june",
-                   "july","august","september","october","november","december"][mi];
-      if (sl === m3 || sl === mFull || sl.slice(0,3) === m3) return MONTH3[mi];
-    }
-    return s;
-  }
+  /* normMonthName() (top-level, shared) is used below instead of a
+     locally-nested normMonth() — see its definition near
+     canonicalRsmName() for why it was promoted out of this
+     function. */
 
   /* Range: BJ:BP  (BJ = col 62, 7 cols)
        BJ(col 62)=Timestamp  BK(col 63)=Hospital  BL(col 64)=Product(s)
@@ -4673,7 +4965,7 @@ function getDashboardData(forceRefresh) {
       fcRows.forEach(function(row) {
         var hospital = String(row[0] || "").trim();  /* BJ = Hospital Name */
         var prodCell = String(row[1] || "").trim();  /* BK = Demo Product ← products here */
-        var month    = normMonth(row[3]);             /* BM = Expected Sale Month */
+        var month    = normMonthName(row[3]);         /* BM = Expected Sale Month */
         var boVal    = row[5];                        /* BO = Approx Expecting Sale */
 
         if (!prodCell || !month) return;
@@ -4815,7 +5107,7 @@ function getDashboardData(forceRefresh) {
     var bR = rep.getRange(2, 62, rep.getLastRow() - 1, 7).getValues();
     var bHits = 0, bMiss = 0;
     for (var bi = 0; bi < bR.length; bi++) {
-      var bBm  = normMonth(bR[bi][3]);           /* BM col65 - Expected Sale Month */
+      var bBm  = normMonthName(bR[bi][3]);       /* BM col65 - Expected Sale Month */
       var bBo  = bR[bi][5];                       /* BO col67 - Approx Sale Value */
       var bBp  = String(bR[bi][6] || "").trim();  /* BP col68 - RSM Name directly */
       if (!bBm || !bBp) continue;
@@ -5226,6 +5518,82 @@ function testProductsThisMonth() {
    rows) labeled by their ASSUMED field, so we can see definitively
    whether State really is in column BL or somewhere else.
 ══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   testAnalysisGqHa()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Runs the EXACT SAME logic as Analysis Graphs 1 & 2 (Top 10
+   Customers This Month / This Year) against Report!GQ:HA
+   (GR=Hospital index1, GV=Amount index5, HA=Date index10), and
+   logs EVERY row's fate — counted toward This Month, counted
+   toward This Year, or skipped and exactly why (blank hospital,
+   unparseable HA date, zero/blank amount, or date outside both
+   windows) — so we can see definitively why the graphs are blank.
+══════════════════════════════════════════════════ */
+function testAnalysisGqHa() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  Logger.log("Last row: " + lastRow);
+
+  var today    = new Date();
+  var curMonth = today.getMonth();
+  var curYear  = today.getFullYear();
+  var fyYear   = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+  var fyStart  = new Date(fyYear, 3, 1);
+  Logger.log("Server 'today': " + today.toString());
+  Logger.log("Current month/year: " + (curMonth + 1) + "/" + curYear);
+  Logger.log("FY start: " + fyStart.toDateString());
+
+  var data = rep.getRange(2, 199, lastRow - 1, 11).getValues(); /* GQ=199, 11 cols through HA=209 */
+  Logger.log("Total rows read from GQ:HA: " + data.length);
+
+  var counts = { totalRows: 0, countedThisMonth: 0, countedThisYear: 0, skippedNoHospital: 0, skippedBadDate: 0, skippedZeroAmount: 0, skippedOutsideWindow: 0 };
+  var sampleRows = [];
+  var badDateSamples = [];
+
+  data.forEach(function(r, i) {
+    counts.totalRows++;
+    var hospital  = String(r[1] || "").trim();  /* GR */
+    var amountRaw = r[5];                        /* GV */
+    var dateRaw   = r[10];                       /* HA */
+
+    if (i < 10) {
+      sampleRows.push("Row " + (i+2) + ": GR(hosp)=[" + r[1] + "] GV(amt)=[" + r[5] + "] type=" + (typeof r[5]) + " HA(date)=[" + r[10] + "] type=" + (typeof r[10]) + (r[10] instanceof Date ? " (Date obj)" : ""));
+    }
+
+    if (!hospital) { counts.skippedNoHospital++; return; }
+
+    var d = parseSheetTimestamp(dateRaw);
+    if (!d) {
+      counts.skippedBadDate++;
+      if (badDateSamples.length < 15) badDateSamples.push("Row " + (i+2) + ": rawHA=[" + dateRaw + "] type=" + (typeof dateRaw) + " hospital=[" + hospital + "]");
+      return;
+    }
+
+    var amount = typeof amountRaw === "number" ? amountRaw : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) { counts.skippedZeroAmount++; return; }
+
+    var isCurrentMonth = (d.getMonth() === curMonth && d.getFullYear() === curYear);
+    var isThisFyPriorMonth = (d >= fyStart && d <= today && !isCurrentMonth);
+
+    if (isCurrentMonth) counts.countedThisMonth++;
+    else if (isThisFyPriorMonth) counts.countedThisYear++;
+    else counts.skippedOutsideWindow++;
+  });
+
+  Logger.log("=== SAMPLE: first 10 raw rows (regardless of validity) ===");
+  sampleRows.forEach(function(s) { Logger.log(s); });
+  Logger.log("=== COUNTS ===");
+  Logger.log(JSON.stringify(counts));
+  Logger.log("=== SAMPLE: rows skipped due to unparseable HA date (first 15) ===");
+  badDateSamples.forEach(function(s) { Logger.log(s); });
+}
+
 function testProspectiveColumns() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
