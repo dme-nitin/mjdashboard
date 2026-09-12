@@ -6,6 +6,7 @@
 <title>Global Medicare RSM Dashboard v55</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#D4D4D7;
@@ -467,6 +468,9 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   <button class="nav-btn" id="reorderBtn" onclick="openReorderApp()" title="Open Reorder in a new tab">
     <span class="pd" style="background:#DC2626;"></span>Reorder
   </button>
+  <button class="nav-btn" id="analysisBtn" onclick="toggleAnalysisSection()" title="Show Analysis section">
+    <span class="pd" style="background:#7C3AED;"></span>Analysis
+  </button>
 </div>
 
 <div id="salesExecSection" style="display:none;">
@@ -889,6 +893,53 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
       <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
     </div>
     <div id="uaMonthPagination" style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px;font-size:11px;color:var(--tf);"></div>
+  </div>
+</div>
+
+<div id="analysis-section" style="display:none;">
+  <div class="panel" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div class="sec-h" style="margin:0;">Analysis</div>
+      <div class="sec-sub" style="margin:4px 0 0;">Live from Report sheet — refreshes with the rest of the dashboard</div>
+    </div>
+    <button class="rbtn" style="background:linear-gradient(135deg,#475569,#334155);" onclick="toggleAnalysisSection()">
+      ← Back to Dashboard
+    </button>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">1. Top 10 Customers This Month</div>
+    <div style="position:relative;height:340px;"><canvas id="chartTopCustomersThisMonth"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">2. Top 10 Customers This Year</div>
+    <div style="position:relative;height:340px;"><canvas id="chartTopCustomersThisYear"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">3. State Wise Prospective</div>
+    <div style="position:relative;height:340px;"><canvas id="chartStateWiseProspective"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">4. City Wise Prospective</div>
+    <div style="position:relative;height:340px;"><canvas id="chartCityWiseProspective"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">5. State Wise Top 10 Sale</div>
+    <div style="position:relative;height:340px;"><canvas id="chartStateWiseTopSale"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">6. City Wise Top 10 Sale</div>
+    <div style="position:relative;height:340px;"><canvas id="chartCityWiseTopSale"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:10px;">7. Top 10 Customers — Sale Wise</div>
+    <div style="position:relative;height:340px;"><canvas id="chartTopCustomersBySale"></canvas></div>
   </div>
 </div>
 
@@ -3321,7 +3372,8 @@ function updateNavActiveStates() {
     salesBtn: typeof salesSectionOpen !== 'undefined' && salesSectionOpen,
     accountsBtn: typeof accountsSectionOpen !== 'undefined' && accountsSectionOpen,
     hrBtn: typeof hrSectionOpen !== 'undefined' && hrSectionOpen,
-    prospectiveBtn: typeof prospectiveSectionOpen !== 'undefined' && prospectiveSectionOpen
+    prospectiveBtn: typeof prospectiveSectionOpen !== 'undefined' && prospectiveSectionOpen,
+    analysisBtn: typeof analysisSectionOpen !== 'undefined' && analysisSectionOpen
   };
   Object.keys(states).forEach(function(id) {
     const btn = document.getElementById(id);
@@ -3379,6 +3431,7 @@ function toggleMJSection() {
     hideHRSection();
     hideSalesSection();
     hideProspectiveSection();
+    hideAnalysisSection();
     hideUniqueAddedMonthSection();
     mainView.style.display = 'none';
     mjSec.style.display    = 'block';
@@ -3418,6 +3471,7 @@ function toggleSalesSection() {
     hideHRSection();
     hideMJSection();
     hideProspectiveSection();
+    hideAnalysisSection();
     hideUniqueAddedMonthSection();
     mainView.style.display = 'none';
     salesSec.style.display = 'block';
@@ -3545,6 +3599,7 @@ function toggleAccountsSection() {
     hideSalesExecSection();
     hideHRSection();
     hideProspectiveSection();
+    hideAnalysisSection();
     hideUniqueAddedMonthSection();
     hideMJSection();
     hideSalesSection();
@@ -3591,6 +3646,7 @@ function toggleHRSection() {
     hideSalesExecSection();
     hideAccountsSection();
     hideProspectiveSection();
+    hideAnalysisSection();
     hideUniqueAddedMonthSection();
     hideMJSection();
     hideSalesSection();
@@ -3642,6 +3698,7 @@ function toggleProspectiveSection() {
     hideMJSection();
     hideSalesSection();
     hideUniqueAddedMonthSection();
+    hideAnalysisSection();
     mainView.style.display = 'none';
     pSec.style.display     = 'block';
     if (!prospectiveListLoaded) fetchProspectiveCustomersList();
@@ -3687,6 +3744,7 @@ function toggleUniqueAddedMonthSection() {
     hideMJSection();
     hideSalesSection();
     hideProspectiveSection();
+    hideAnalysisSection();
     mainView.style.display = 'none';
     sec.style.display      = 'block';
     const labelEl = document.getElementById('uaMonthLabel');
@@ -3702,6 +3760,171 @@ function hideUniqueAddedMonthSection() {
   const sec = document.getElementById('unique-added-month-section');
   if (sec) sec.style.display = 'none';
   uniqueAddedMonthSectionOpen = false;
+}
+
+/* ══════════════════════════════════════════════════
+   ANALYSIS SECTION — 7 graphs, all powered by ONE call to
+   getAnalysisData() (Code.gs), which reuses the exact same
+   live-sheet-read approach as every other section in this file.
+══════════════════════════════════════════════════ */
+let analysisSectionOpen = false;
+let analysisDataLoaded  = false;
+let analysisChartInstances = {}; /* canvasId -> Chart.js instance, so re-fetches destroy+rebuild cleanly */
+
+function toggleAnalysisSection() {
+  const mainView = document.getElementById('mainView');
+  const sec      = document.getElementById('analysis-section');
+  if (!mainView || !sec) return;
+
+  analysisSectionOpen = !analysisSectionOpen;
+
+  if (analysisSectionOpen) {
+    hideSalesExecSection();
+    hideAccountsSection();
+    hideHRSection();
+    hideMJSection();
+    hideSalesSection();
+    hideProspectiveSection();
+    hideUniqueAddedMonthSection();
+    mainView.style.display = 'none';
+    sec.style.display      = 'block';
+    if (!analysisDataLoaded) fetchAnalysisData();
+  } else {
+    sec.style.display      = 'none';
+    mainView.style.display = '';
+  }
+  updateNavActiveStates();
+}
+
+function hideAnalysisSection() {
+  const sec = document.getElementById('analysis-section');
+  if (sec) sec.style.display = 'none';
+  analysisSectionOpen = false;
+}
+
+function fetchAnalysisData() {
+  const canvasIds = ['chartTopCustomersThisMonth','chartTopCustomersThisYear','chartStateWiseProspective',
+    'chartCityWiseProspective','chartStateWiseTopSale','chartCityWiseTopSale','chartTopCustomersBySale'];
+  canvasIds.forEach(function(id) {
+    const c = document.getElementById(id);
+    if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+  });
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(function(data) { analysisDataLoaded = true; renderAnalysisCharts(data); })
+      .withFailureHandler(function(err) {
+        console.error('[GM] getAnalysisData error:', err);
+      })
+      .getAnalysisData();
+  } else {
+    /* JSONP fallback — same pattern used elsewhere in this file */
+    const old = document.getElementById('__gm_analysis_j');
+    if (old) old.remove();
+    const cb = '__gmanalysiscb' + Date.now();
+    window[cb] = function(data) { cleanup(); analysisDataLoaded = true; renderAnalysisCharts(data); };
+    const timer = setTimeout(function() { cleanup(); console.error('[GM] getAnalysisData timeout'); }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      const s = document.getElementById('__gm_analysis_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    const s = document.createElement('script');
+    s.id  = '__gm_analysis_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=analysisData&_=' + Date.now();
+    s.onerror = function() { cleanup(); console.error('[GM] getAnalysisData network error'); };
+    document.head.appendChild(s);
+  }
+}
+
+/* Draws ONE horizontal bar chart into the given canvas ID, using
+   Chart.js. `rows` is [{label, value}, ...]. Indian abbreviated
+   currency (₹1.26 Cr / ₹45 L) is used for money charts; plain
+   integer counts for the two Prospective charts. Re-fetching
+   destroys any previous Chart.js instance on that canvas first,
+   so re-opening the Analysis section never stacks duplicate
+   charts on top of each other. */
+function renderBarChart(canvasId, rows, isMoney) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (analysisChartInstances[canvasId]) {
+    analysisChartInstances[canvasId].destroy();
+    delete analysisChartInstances[canvasId];
+  }
+
+  if (!rows || !rows.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '12px Inter, sans-serif';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data available', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const labels = rows.map(function(r) { return r.label; });
+  const values = rows.map(function(r) { return r.value; });
+
+  analysisChartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: '#2563EB',
+        borderRadius: 4,
+        maxBarThickness: 48
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return isMoney ? fmtRupeeShort(ctx.parsed.y) : ctx.parsed.y.toLocaleString('en-IN');
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            color: '#0F172A',
+            font: { size: 10.5, weight: '500' },
+            maxRotation: 45,
+            minRotation: 0,
+            autoSkip: false
+          }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#E2E8F0' },
+          ticks: {
+            color: '#475569',
+            font: { size: 10 },
+            callback: function(val) { return isMoney ? fmtRupeeShort(val) : val; }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderAnalysisCharts(data) {
+  if (!data) return;
+  renderBarChart('chartTopCustomersThisMonth', data.topCustomersThisMonth, true);
+  renderBarChart('chartTopCustomersThisYear',  data.topCustomersThisYear,  true);
+  renderBarChart('chartStateWiseProspective',  data.stateWiseProspective,  false);
+  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false);
+  renderBarChart('chartStateWiseTopSale',      data.stateWiseTopSale,      true);
+  renderBarChart('chartCityWiseTopSale',       data.cityWiseTopSale,       true);
+  renderBarChart('chartTopCustomersBySale',    data.topCustomersBySale,    true);
 }
 
 function fetchUniqueAddedMonthReport() {
@@ -4591,6 +4814,17 @@ function renderSalesExecDetailReport(data) {
 function fmtRupee(n) {
   n = Number(n) || 0;
   return '₹' + n.toLocaleString('en-IN');
+}
+
+/* Indian abbreviated currency format for chart labels/tooltips —
+   ₹1.26 Cr / ₹45.00 L / ₹25,000, switching threshold at 1 Crore
+   and 1 Lakh respectively; anything smaller just uses fmtRupee(). */
+function fmtRupeeShort(n) {
+  n = Number(n) || 0;
+  const abs = Math.abs(n);
+  if (abs >= 10000000) return '₹' + (n / 10000000).toFixed(2) + ' Cr';
+  if (abs >= 100000)   return '₹' + (n / 100000).toFixed(2) + ' L';
+  return fmtRupee(n);
 }
 
 function fetchCurrentBankData() {
@@ -6278,6 +6512,11 @@ registerRefreshHook(function refreshSaleTrendOnDemand() {
 registerRefreshHook(function refreshSalesExecUniqueCustomersTrendOnDemand() {
   salesExecUniqueCustomersTrendLoaded = false;
   fetchSalesExecutiveUniqueCustomersTrend();
+});
+
+registerRefreshHook(function refreshAnalysisDataOnDemand() {
+  analysisDataLoaded = false;
+  if (analysisSectionOpen) fetchAnalysisData();
 });
 
 /* ══════════════════════════════════════════════════
