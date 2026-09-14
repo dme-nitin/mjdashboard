@@ -3845,7 +3845,7 @@ function fetchAnalysisData() {
    destroys any previous Chart.js instance on that canvas first,
    so re-opening the Analysis section never stacks duplicate
    charts on top of each other. */
-function renderBarChart(canvasId, rows, isMoney) {
+function renderBarChart(canvasId, rows, isMoney, hideXLabels) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || typeof Chart === 'undefined') return;
 
@@ -3884,6 +3884,10 @@ function renderBarChart(canvasId, rows, isMoney) {
       plugins: {
         legend: { display: false },
         tooltip: {
+          /* Default title callback already shows the bar's label
+             (city/state/customer name) — this is what makes the
+             name appear on hover even when the x-axis labels
+             themselves are hidden below. */
           callbacks: {
             label: function(ctx) {
               return isMoney ? fmtRupeeShort(ctx.parsed.y) : ctx.parsed.y.toLocaleString('en-IN');
@@ -3894,7 +3898,7 @@ function renderBarChart(canvasId, rows, isMoney) {
       scales: {
         x: {
           grid: { display: false },
-          ticks: {
+          ticks: hideXLabels ? { display: false } : {
             color: '#0F172A',
             font: { size: 10.5, weight: '500' },
             maxRotation: 45,
@@ -3921,7 +3925,7 @@ function renderAnalysisCharts(data) {
   renderBarChart('chartTopCustomersThisMonth', data.topCustomersThisMonth, true);
   renderBarChart('chartTopCustomersThisYear',  data.topCustomersThisYear,  true);
   renderBarChart('chartStateWiseProspective',  data.stateWiseProspective,  false);
-  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false);
+  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false, true);
   renderBarChart('chartStateWiseTopSale',      data.stateWiseTopSale,      true);
   renderBarChart('chartCityWiseTopSale',       data.cityWiseTopSale,       true);
   renderBarChart('chartTopCustomersBySale',    data.topCustomersBySale,    true);
