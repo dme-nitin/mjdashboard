@@ -4190,7 +4190,7 @@ function fetchProspectiveCustomersList() {
 }
 
 let cProspectiveRowsRaw = [];
-let prospectiveFilters = { hospital: [], state: [], product: [], month: [], sale: [], rsm: [] };
+let prospectiveFilters = { hospital: [], state: [], product: [], month: [], week: [], sale: [], rsm: [] };
 let prospectiveOpenDropdown = null;   // which column's panel is currently open (or null)
 let prospectiveSearchText  = { hospital: '', state: '', product: '', month: '', sale: '', rsm: '' };
 
@@ -4199,9 +4199,9 @@ function renderProspectiveCustomersList(data) {
   if (!el) return;
 
   cProspectiveRowsRaw = Array.isArray(data) ? data : [];
-  prospectiveFilters = { hospital: [], state: [], product: [], month: [], sale: [], rsm: [] };
+  prospectiveFilters = { hospital: [], state: [], product: [], month: [], week: [], sale: [], rsm: [] };
   prospectiveOpenDropdown = null;
-  prospectiveSearchText = { hospital: '', state: '', product: '', month: '', sale: '', rsm: '' };
+  prospectiveSearchText = { hospital: '', state: '', product: '', month: '', week: '', sale: '', rsm: '' };
 
   /* Confirmed status is now PERSISTED server-side (PropertiesService,
      shared across every user/device) — each row already carries its
@@ -4322,6 +4322,7 @@ const PROSPECTIVE_FILTER_COLS = [
   { key: 'state',    field: 'state',    label: 'State' },
   { key: 'product',  field: 'product',  label: 'Demo Product' },
   { key: 'month',    field: 'month',    label: 'Expected Month' },
+  { key: 'week',     field: 'week',     label: 'Week' },
   { key: 'sale',     field: 'sale',     label: 'Expected Sale', isAmount: true },
   { key: 'rsm',      field: 'rsm',      label: 'RSM' }
 ];
@@ -4431,7 +4432,7 @@ function buildProspectiveTable() {
   const filterRowHtml = '<tr class="prospective-filter-row">' +
     '<th style="top:27px;"></th>' +
     PROSPECTIVE_FILTER_COLS.map(function(col) {
-      return '<th style="top:27px;overflow:visible;' + (col.key === 'product' || col.key === 'month' || col.key === 'sale' || col.key === 'rsm' ? 'padding-left:10px;' : '') + '">' +
+      return '<th style="top:27px;overflow:visible;' + (col.key === 'product' || col.key === 'month' || col.key === 'week' || col.key === 'sale' || col.key === 'rsm' ? 'padding-left:10px;' : '') + '">' +
         dropdownHtml(col) +
       '</th>';
     }).join('') +
@@ -4447,6 +4448,7 @@ function buildProspectiveTable() {
           '<th>State</th>' +
           '<th style="text-align:center;padding-left:10px;">Demo Product</th>' +
           '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
+          '<th style="text-align:center;padding-left:10px;">Week</th>' +
           '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
           '<th style="text-align:center;padding-left:10px;">RSM</th>' +
           '<th style="text-align:center;padding-left:10px;">Confirm / Not Confirm</th>' +
@@ -4465,6 +4467,7 @@ function buildProspectiveTable() {
       '<td>' + (r.state || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.product || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.month || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' + (r.week || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(r.sale) + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.rsm || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' +
@@ -4481,6 +4484,7 @@ function buildProspectiveTable() {
         '<th>State</th>' +
         '<th style="text-align:center;padding-left:10px;">Demo Product</th>' +
         '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
+        '<th style="text-align:center;padding-left:10px;">Week</th>' +
         '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
         '<th style="text-align:center;padding-left:10px;">RSM</th>' +
         '<th style="text-align:center;padding-left:10px;">Confirm / Not Confirm</th>' +
@@ -4546,8 +4550,8 @@ function onProspectiveSearchInput(key, value) {
 }
 
 function resetProspectiveFilters() {
-  prospectiveFilters = { hospital: [], state: [], product: [], month: [], sale: [], rsm: [] };
-  prospectiveSearchText = { hospital: '', state: '', product: '', month: '', sale: '', rsm: '' };
+  prospectiveFilters = { hospital: [], state: [], product: [], month: [], week: [], sale: [], rsm: [] };
+  prospectiveSearchText = { hospital: '', state: '', product: '', month: '', week: '', sale: '', rsm: '' };
   prospectiveOpenDropdown = null;
   buildProspectiveTable();
 }
