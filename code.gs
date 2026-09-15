@@ -1023,12 +1023,12 @@ function getCurrentBankData() {
      GC (col 185) = PAYMENT RECEIVED DATE    ← filter column
      GD (col 186) = VARSHA / KAMALJEET       ← employee grouping
 
-   TO BE RECEIVED THIS WEEK source: Report!DP:DW (SEPARATE
-   8-col block, DP = col 120) — a different range/logic entirely
+   TO BE RECEIVED THIS WEEK source: Report!HC:HI (SEPARATE
+   7-col block, HC = col 211) — a different range/logic entirely
    from the 3 windows above:
-     DS (col 123) = Amount                    ← summed
-     DV (col 126) = VARSHA / KAMALJEET         ← employee grouping
-     DW (col 127) = Expected Payment Date      ← filter column
+     HG (col 215) = Payment Amount             ← summed
+     HH (col 216) = Payment Date               ← filter column
+     HI (col 217) = VARSHA / KAMALJEET         ← employee grouping
 
    4 date windows (all computed fresh from the server's current
    date on every call — nothing hardcoded, nothing cached across
@@ -1039,7 +1039,7 @@ function getCurrentBankData() {
                             Source: FX:GD (GC).
      2. TO BE RECEIVED THIS WEEK : Tomorrow (today + 1 day) →
                             this week's Saturday (inclusive).
-                            Source: DP:DW (DW). A DW date that
+                            Source: HC:HI (HH). An HH date that
                             falls on a SUNDAY is treated as if it
                             were the following MONDAY before the
                             range check (Sundays are never "in" a
@@ -1126,17 +1126,18 @@ function getPaymentSummaryByEmployee() {
   });
 
   /* ── "Payment To Be Received This Week" — SEPARATE data source
-     (Report!DP:DW, NOT FX:GD) and SEPARATE window:
+     (Report!HC:HI, NOT FX:GD, NOT DP:DW) and SEPARATE window:
        Tomorrow (today + 1 day) → this week's Saturday (inclusive)
      If today itself is Saturday, tomorrow is Sunday, which is
      after this week's Saturday — the window is empty and every
      employee's total is correctly ₹0 for the rest of that day.
 
-     DV (col 126, index 6 in this 8-col read) = Varsha/Kamaljeet
-     DW (col 127, index 7)                    = Expected Payment Date
-     DS (col 123, index 3)                    = Amount
+     HC=col211, 7 cols through HI=col217:
+     HG (col 215, index 4 in this 7-col read) = Payment Amount
+     HH (col 216, index 5)                    = Payment Date
+     HI (col 217, index 6)                    = Varsha/Kamaljeet
 
-     Sunday handling: if a row's DW falls on a Sunday, it's treated
+     Sunday handling: if a row's HH falls on a Sunday, it's treated
      as if it were scheduled for the FOLLOWING Monday (Sundays are
      never "in" any Mon–Sat week in this dashboard's shared
      definition) — implemented by shifting the effective date
@@ -1148,29 +1149,27 @@ function getPaymentSummaryByEmployee() {
   EMP_ORDER.forEach(function(e) { toBeReceivedSums[e] = 0; });
 
   if (tomorrow <= thisSaturdayEnd) {
-    /* DP=120, 8 cols through DW=127 — same block getWeeklyPayments()/
-       getMonthlyPayments() read, scanned again here independently
-       since this panel's window logic is unique to it. */
-    var dpData = rep.getRange(2, 120, lastRow - 1, 8).getValues();
+    /* HC=211, 7 cols through HI=217 */
+    var hcData = rep.getRange(2, 211, lastRow - 1, 7).getValues();
 
-    dpData.forEach(function(r) {
-      var amountRaw = r[3]; /* DS */
-      var empRaw    = String(r[6] || "").trim(); /* DV */
-      var dwRaw     = r[7]; /* DW */
+    hcData.forEach(function(r) {
+      var amountRaw = r[4]; /* HG */
+      var hhRaw     = r[5]; /* HH */
+      var empRaw    = String(r[6] || "").trim(); /* HI */
 
       if (!empRaw) return;
       var emp = EMP_ORDER.filter(function(e) { return e.toLowerCase() === empRaw.toLowerCase(); })[0];
       if (!emp) return; /* name doesn't match Kamaljeet/Varsha — skip */
 
-      var dw = parseSheetTimestamp(dwRaw);
-      if (!dw) return;
+      var hh = parseSheetTimestamp(hhRaw);
+      if (!hh) return;
 
       /* Sunday → shift to the following Monday before comparing */
-      var effectiveDate = dw;
-      if (dw.getDay() === 0) {
-        effectiveDate = new Date(dw.getFullYear(), dw.getMonth(), dw.getDate() + 1, 0, 0, 0, 0);
+      var effectiveDate = hh;
+      if (hh.getDay() === 0) {
+        effectiveDate = new Date(hh.getFullYear(), hh.getMonth(), hh.getDate() + 1, 0, 0, 0, 0);
       } else {
-        effectiveDate = new Date(dw.getFullYear(), dw.getMonth(), dw.getDate(), 0, 0, 0, 0);
+        effectiveDate = new Date(hh.getFullYear(), hh.getMonth(), hh.getDate(), 0, 0, 0, 0);
       }
 
       if (effectiveDate < tomorrow || effectiveDate > thisSaturdayEnd) return; /* outside tomorrow→Saturday window */
