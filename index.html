@@ -4295,6 +4295,7 @@ function renderConfirmedCustomersPanel() {
       '<td>' + (r.state || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.product || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.month || '—') + '</td>' +
+      '<td style="text-align:center;padding-left:10px;">' + (r.week || '—') + '</td>' +
       '<td style="text-align:center;padding-left:10px;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(r.sale) + '</td>' +
       '<td style="text-align:center;padding-left:10px;">' + (r.rsm || '—') + '</td>' +
     '</tr>';
@@ -4308,6 +4309,7 @@ function renderConfirmedCustomersPanel() {
         '<th>State</th>' +
         '<th style="text-align:center;padding-left:10px;">Demo Product</th>' +
         '<th style="text-align:center;padding-left:10px;">Expected Month</th>' +
+        '<th style="text-align:center;padding-left:10px;">Week</th>' +
         '<th style="text-align:center;padding-left:10px;">Expected Sale</th>' +
         '<th style="text-align:center;padding-left:10px;">RSM</th>' +
       '</tr></thead>' +
