@@ -3933,7 +3933,7 @@ function setProspectiveConfirmStatus(fingerprint, confirmed) {
    unrelated Sales-Executive report from Report!BR:BW) — kept as
    a separate name so nothing there is touched.
 
-   Source: Report!BJ:BP (7 cols, BJ = col 62) — same block
+   Source: Report!BJ:BQ (8 cols, BJ = col 62) — same block
    already used by the "RSM Wise Total Expected Sale" forecast
    feature elsewhere in this file:
      BJ (col 62) = Hospital Name
@@ -3945,18 +3945,19 @@ function setProspectiveConfirmStatus(fingerprint, confirmed) {
                                              must not show it
      BO (col 67) = Approx Expecting Sale
      BP (col 68) = RSM Name
+     BQ (col 69) = Week
 
    Returns each row already in the requested DISPLAY order
-   (Hospital, State, Product, Month, Sale, RSM) as an object —
-   the frontend just renders these fields directly, in this
-   order, with no email field present at all. Each row ALSO
-   carries a `fingerprint` (its persistent checkbox identity) and
-   `confirmed` (its current Confirm/Not Confirm status, read live
-   from PropertiesService) — so the frontend never has to reset
-   checkboxes to unchecked on load; it always reflects the truly
-   saved state.
+   (Hospital, State, Product, Month, Week, Sale, RSM) as an
+   object — the frontend just renders these fields directly, in
+   this order, with no email field present at all. Each row ALSO
+   carries a `fingerprint` (its persistent checkbox identity,
+   built WITHOUT week — see below) and `confirmed` (its current
+   Confirm/Not Confirm status, read live from PropertiesService)
+   — so the frontend never has to reset checkboxes to unchecked
+   on load; it always reflects the truly saved state.
 
-   Returns: [ { hospital, state, product, month, sale, rsm, fingerprint, confirmed }, ... ]
+   Returns: [ { hospital, state, product, month, week, sale, rsm, fingerprint, confirmed }, ... ]
 ══════════════════════════════════════════════════ */
 function getProspectiveCustomersList() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
@@ -3969,8 +3970,9 @@ function getProspectiveCustomersList() {
   var confirmedSet = {};
   getConfirmedProspectiveFingerprints().forEach(function(fp) { confirmedSet[fp] = true; });
 
-  /* BJ=62, 7 cols through BP=68 */
-  var data = rep.getRange(2, 62, lastRow - 1, 7).getValues();
+  /* BJ=62, 8 cols through BQ=69 — BQ added per requirement, right
+     after BP (RSM), for the new "Week" column/filter. */
+  var data = rep.getRange(2, 62, lastRow - 1, 8).getValues();
   var rows = [];
 
   data.forEach(function(r) {
@@ -3981,8 +3983,27 @@ function getProspectiveCustomersList() {
     /* r[4] = BN = Sales Executive Email — read but never included below */
     var saleRaw  = r[5];                       /* BO */
     var rsm      = String(r[6] || "").trim();  /* BP */
+    var weekRaw  = r[7];                       /* BQ */
 
     if (!hospital) return; /* skip fully blank rows */
+
+    /* Week: Sheets sometimes auto-formats a plain small number
+       (e.g. "3", "4" meaning "Week 3"/"Week 4") as a DATE purely
+       because of the column's inherited cell formatting — getValues()
+       then hands back a real JS Date object instead of the number
+       that was actually typed, and naively stringifying that Date
+       produces garbage like "Wed Jan 03 1900 00:00:00 GMT+0521...".
+       If BQ comes back as a Date, convert it back to the underlying
+       day-count (Sheets' date epoch is 30 Dec 1899) rather than
+       displaying the raw Date text. Anything else (plain text/
+       number) is used as-is. */
+    var week;
+    if (weekRaw instanceof Date) {
+      var sheetsEpoch = new Date(1899, 11, 30);
+      week = String(Math.round((weekRaw.getTime() - sheetsEpoch.getTime()) / 86400000));
+    } else {
+      week = String(weekRaw || "").trim();
+    }
 
     var month;
     if (monthRaw instanceof Date) {
@@ -3995,6 +4016,12 @@ function getProspectiveCustomersList() {
                : (parseFloat(String(saleRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
     var saleRounded = Math.round(sale);
 
+    /* Fingerprint deliberately UNCHANGED (still hospital|state|
+       product|month|sale|rsm, no "week" mixed in) — this keeps
+       every ALREADY-CONFIRMED row's persistent checkbox identity
+       exactly as it was before this column was added; adding week
+       into the hash would have silently reset every existing
+       Confirmed customer back to unchecked. */
     var fingerprint = buildProspectiveFingerprint(hospital, state, product, month, saleRounded, rsm);
 
     rows.push({
@@ -4002,6 +4029,7 @@ function getProspectiveCustomersList() {
       state       : state,
       product     : product,
       month       : month,
+      week        : week,
       sale        : saleRounded,
       rsm         : rsm,
       fingerprint : fingerprint,
