@@ -5838,6 +5838,56 @@ function removeDailyExpectedPaymentTrigger() {
 /* Main entry point — called by the daily trigger (or run manually to
    test). Fetches the live weekly data, splits it by person, builds two
    PDFs, and emails both as attachments in a single message. */
+/* ══════════════════════════════════════════════════
+   testDailyEmailPersonMatch()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No email is sent by this function — it only
+   inspects data, safe to run any time.
+
+   Calls the EXACT SAME getWeeklyPayments() the daily email uses,
+   then logs EVERY row's raw "person" value (from Report!DV) and
+   whether _matchesPerson() considers it Kamaljeet, Varsha, or
+   NEITHER — this is how we find the exact spelling/spacing
+   variant in the sheet that's failing to match, since the
+   dashboard's on-screen "Expected Payment Receive This Week"
+   panel is confirmed to already show full/correct data (it uses
+   the same getWeeklyPayments() rows, just without the
+   Kamaljeet/Varsha split the email applies afterward).
+══════════════════════════════════════════════════ */
+function testDailyEmailPersonMatch() {
+  var payload = getWeeklyPayments();
+  var rows = (payload && payload.rows) ? payload.rows : [];
+  Logger.log("Total rows from getWeeklyPayments(): " + rows.length);
+  Logger.log("Week: " + payload.weekStart + " to " + payload.weekEnd);
+
+  var kamaljeetCount = 0, varshaCount = 0, neitherCount = 0;
+  var neitherSamples = [];
+
+  rows.forEach(function(r, i) {
+    var isK = _matchesPerson(r.person, "Kamaljeet");
+    var isV = _matchesPerson(r.person, "Varsha");
+    if (isK) kamaljeetCount++;
+    else if (isV) varshaCount++;
+    else {
+      neitherCount++;
+      if (neitherSamples.length < 30) {
+        neitherSamples.push("Row " + (i+1) + ": person=[" + r.person + "] (length=" + String(r.person || "").length + ") customer=[" + r.customer + "]");
+      }
+    }
+    if (i < 10) {
+      Logger.log("Row " + (i+1) + ": person=[" + r.person + "] → Kamaljeet=" + isK + " Varsha=" + isV + " customer=[" + r.customer + "]");
+    }
+  });
+
+  Logger.log("=== SUMMARY ===");
+  Logger.log("Matched Kamaljeet: " + kamaljeetCount);
+  Logger.log("Matched Varsha: " + varshaCount);
+  Logger.log("Matched NEITHER (this is the bug if > 0): " + neitherCount);
+  Logger.log("=== SAMPLE: rows matching NEITHER Kamaljeet nor Varsha (first 30) ===");
+  neitherSamples.forEach(function(s) { Logger.log(s); });
+}
+
 function sendDailyExpectedPaymentReport() {
   var payload = getWeeklyPayments();            // live, reused source
   var rows    = (payload && payload.rows) ? payload.rows : [];
