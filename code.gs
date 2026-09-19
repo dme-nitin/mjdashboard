@@ -4244,9 +4244,10 @@ function setProspectiveConfirmStatus(fingerprint, confirmed) {
    unrelated Sales-Executive report from Report!BR:BW) — kept as
    a separate name so nothing there is touched.
 
-   Source: Report!BJ:BQ (8 cols, BJ = col 62) — same block
+   Source: Report!BI:BQ (9 cols, BI = col 61) — same block
    already used by the "RSM Wise Total Expected Sale" forecast
    feature elsewhere in this file:
+     BI (col 61) = City
      BJ (col 62) = Hospital Name
      BK (col 63) = Demo Product
      BL (col 64) = State
@@ -4259,16 +4260,17 @@ function setProspectiveConfirmStatus(fingerprint, confirmed) {
      BQ (col 69) = Week
 
    Returns each row already in the requested DISPLAY order
-   (Hospital, State, Product, Month, Week, Sale, RSM) as an
+   (Hospital, State, City, Product, Month, Week, Sale, RSM) as an
    object — the frontend just renders these fields directly, in
    this order, with no email field present at all. Each row ALSO
    carries a `fingerprint` (its persistent checkbox identity,
-   built WITHOUT week — see below) and `confirmed` (its current
-   Confirm/Not Confirm status, read live from PropertiesService)
-   — so the frontend never has to reset checkboxes to unchecked
-   on load; it always reflects the truly saved state.
+   built WITHOUT city or week — see below) and `confirmed` (its
+   current Confirm/Not Confirm status, read live from
+   PropertiesService) — so the frontend never has to reset
+   checkboxes to unchecked on load; it always reflects the truly
+   saved state.
 
-   Returns: [ { hospital, state, product, month, week, sale, rsm, fingerprint, confirmed }, ... ]
+   Returns: [ { hospital, state, city, product, month, week, sale, rsm, fingerprint, confirmed }, ... ]
 ══════════════════════════════════════════════════ */
 function getProspectiveCustomersList() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
@@ -4281,20 +4283,22 @@ function getProspectiveCustomersList() {
   var confirmedSet = {};
   getConfirmedProspectiveFingerprints().forEach(function(fp) { confirmedSet[fp] = true; });
 
-  /* BJ=62, 8 cols through BQ=69 — BQ added per requirement, right
-     after BP (RSM), for the new "Week" column/filter. */
-  var data = rep.getRange(2, 62, lastRow - 1, 8).getValues();
+  /* BI=61, 9 cols through BQ=69 — BI (City) added per requirement,
+     right before BJ (Hospital); BQ (Week) was already added in an
+     earlier change. */
+  var data = rep.getRange(2, 61, lastRow - 1, 9).getValues();
   var rows = [];
 
   data.forEach(function(r) {
-    var hospital = String(r[0] || "").trim(); /* BJ */
-    var product  = String(r[1] || "").trim(); /* BK */
-    var state    = String(r[2] || "").trim(); /* BL */
-    var monthRaw = r[3];                       /* BM */
-    /* r[4] = BN = Sales Executive Email — read but never included below */
-    var saleRaw  = r[5];                       /* BO */
-    var rsm      = String(r[6] || "").trim();  /* BP */
-    var weekRaw  = r[7];                       /* BQ */
+    var city     = String(r[0] || "").trim(); /* BI */
+    var hospital = String(r[1] || "").trim(); /* BJ */
+    var product  = String(r[2] || "").trim(); /* BK */
+    var state    = String(r[3] || "").trim(); /* BL */
+    var monthRaw = r[4];                       /* BM */
+    /* r[5] = BN = Sales Executive Email — read but never included below */
+    var saleRaw  = r[6];                       /* BO */
+    var rsm      = String(r[7] || "").trim();  /* BP */
+    var weekRaw  = r[8];                       /* BQ */
 
     if (!hospital) return; /* skip fully blank rows */
 
@@ -4328,16 +4332,17 @@ function getProspectiveCustomersList() {
     var saleRounded = Math.round(sale);
 
     /* Fingerprint deliberately UNCHANGED (still hospital|state|
-       product|month|sale|rsm, no "week" mixed in) — this keeps
-       every ALREADY-CONFIRMED row's persistent checkbox identity
-       exactly as it was before this column was added; adding week
-       into the hash would have silently reset every existing
-       Confirmed customer back to unchecked. */
+       product|month|sale|rsm, no "week" or "city" mixed in) — this
+       keeps every ALREADY-CONFIRMED row's persistent checkbox
+       identity exactly as it was before these columns were added;
+       adding them into the hash would have silently reset every
+       existing Confirmed customer back to unchecked. */
     var fingerprint = buildProspectiveFingerprint(hospital, state, product, month, saleRounded, rsm);
 
     rows.push({
       hospital    : hospital,
       state       : state,
+      city        : city,
       product     : product,
       month       : month,
       week        : week,
