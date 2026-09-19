@@ -1488,9 +1488,9 @@ var CITY_TO_STATE = {
   "ajmer":"Rajasthan","bikaner":"Rajasthan","alwar":"Rajasthan","hanumangarh":"Rajasthan",
   "sri ganganagar":"Rajasthan",
   "lucknow":"Uttar Pradesh","kanpur":"Uttar Pradesh","varanasi":"Uttar Pradesh","agra":"Uttar Pradesh",
-  "allahabad":"Uttar Pradesh","prayagraj":"Uttar Pradesh","noida":"Uttar Pradesh","ghaziabad":"Uttar Pradesh",
+  "allahabad":"Uttar Pradesh","prayagraj":"Uttar Pradesh",
   "meerut":"Uttar Pradesh","bareilly":"Uttar Pradesh","barielly":"Uttar Pradesh","aligarh":"Uttar Pradesh",
-  "moradabad":"Uttar Pradesh","gorakhpur":"Uttar Pradesh","greater noida":"Uttar Pradesh",
+  "moradabad":"Uttar Pradesh","gorakhpur":"Uttar Pradesh",
   "pilkhuwa":"Uttar Pradesh","ayodhya":"Uttar Pradesh","jhansi":"Uttar Pradesh","indirapuram":"Uttar Pradesh",
   "azamgarh":"Uttar Pradesh","mathura":"Uttar Pradesh","gonda":"Uttar Pradesh",
   "patna":"Bihar","gaya":"Bihar","muzaffarpur":"Bihar","bhagalpur":"Bihar","purnea":"Bihar",
@@ -1501,9 +1501,15 @@ var CITY_TO_STATE = {
   "mohli":"Punjab","bathinda":"Punjab","bhatinda":"Punjab","pathankot":"Punjab","phagwara":"Punjab",
   "gurdaspur":"Punjab","gudaspur":"Punjab","hoshiarpur":"Punjab","mansa":"Punjab",
   "sangrur":"Punjab","kharar":"Punjab","zirakpur":"Punjab",
-  "gurgaon":"Haryana","gurugram":"Haryana","faridabad":"Haryana","panipat":"Haryana","hisar":"Haryana",
+  "panipat":"Haryana","hisar":"Haryana",
   "karnal":"Haryana","rohtak":"Haryana","ambala":"Haryana","kaithal":"Haryana","sonipat":"Haryana",
   "bahadurgarh":"Haryana","bhiwani":"Haryana","panchkula":"Haryana","manesar":"Haryana","maneshar":"Haryana",
+  /* NCR cities — deliberately grouped under Delhi/NCR (not their
+     actual home state of UP/Haryana), per explicit requirement:
+     these are treated as part of the Delhi/NCR metro area for
+     reporting purposes, not their geographic state. */
+  "noida":"Delhi","greater noida":"Delhi","ghaziabad":"Delhi",
+  "gurgaon":"Delhi","gurugram":"Delhi","faridabad":"Delhi",
   "bhubaneswar":"Odisha","bhubaneshwar":"Odisha","cuttack":"Odisha","cuttuk":"Odisha",
   "rourkela":"Odisha","balasore":"Odisha",
   "guwahati":"Assam","dibrugarh":"Assam","silchar":"Assam","nagaon":"Assam",
@@ -1827,16 +1833,30 @@ function getAnalysisData() {
 
       /* Graph 6.A / 6.B — City Wise Top 10 Sale, split by the EU
          cell's color into Capex (white) vs Consumables (yellow) —
-         same convention as Graph 5.A/5.B. ONLY rows where ES is a
-         recognized CITY are included; rows where ES is a state (or
-         unrecognized) are excluded entirely, per requirement. */
-      if (loc.type === "city") {
-        var cityKey = esValue.toLowerCase();
+         same convention as Graph 5.A/5.B. Includes rows where ES
+         is a recognized CITY (e.g. "Vasant Kunj") AND rows where
+         ES is a bare state/UT name (e.g. plain "Delhi") — a bare
+         state name is still a real, distinct location worth
+         showing here even though it isn't a specific locality.
+         Only truly UNRESOLVED (type "unknown") rows are excluded.
+
+         NCR-area merge: Delhi, NCR, National Capital Region, and
+         every NCR satellite city (Gurgaon/Gurugram, Faridabad,
+         Noida, Greater Noida, Ghaziabad — all of which resolve to
+         the SAME "Delhi / NCR" state via resolveIndianLocation())
+         are combined into ONE single "Delhi / NCR" bar here,
+         instead of each showing up as its own separate city bar —
+         per explicit requirement. Every OTHER city keeps its own
+         individual bar as before. */
+      if (loc.type === "city" || loc.type === "state") {
+        var isNcrArea = loc.state === "Delhi / NCR";
+        var cityLabel = isNcrArea ? "Delhi / NCR" : esValue;
+        var cityKey   = cityLabel.toLowerCase();
         var cityTargetMap = euColor === "white" ? cityWiseTopSaleCapexMap
                            : euColor === "yellow" ? cityWiseTopSaleConsumablesMap
                            : null; /* "red" (Others) → excluded from both 6.A and 6.B */
         if (cityTargetMap) {
-          if (!cityTargetMap[cityKey]) cityTargetMap[cityKey] = { label: esValue, amount: 0, qty: 0, products: {} };
+          if (!cityTargetMap[cityKey]) cityTargetMap[cityKey] = { label: cityLabel, amount: 0, qty: 0, products: {} };
           cityTargetMap[cityKey].amount += amount;
           cityTargetMap[cityKey].qty    += qty;
           if (euColor === "white" && productName) cityTargetMap[cityKey].products[productName] = true;
@@ -1863,16 +1883,39 @@ function getAnalysisData() {
       .slice(0, n);
   }
 
+  var topCustomersThisMonthFullTotal = 0;
+  Object.keys(topCustomersThisMonthMap).forEach(function(k) { topCustomersThisMonthFullTotal += topCustomersThisMonthMap[k].value; });
+  var topCustomersThisYearFullTotal = 0;
+  Object.keys(topCustomersThisYearMap).forEach(function(k) { topCustomersThisYearFullTotal += topCustomersThisYearMap[k].value; });
+
+  /* Full (uncapped — every state/city, not just the top N shown in
+     the chart) totals for every other graph, used for the new
+     right-side "Total" display next to each panel's heading. */
+  function sumMapField(map, field) {
+    var total = 0;
+    Object.keys(map).forEach(function(k) { total += (map[k][field] || 0); });
+    return Math.round(total);
+  }
+
   return {
     topCustomersThisMonth : topNFromMap(topCustomersThisMonthMap, 10),
+    topCustomersThisMonthTotal : Math.round(topCustomersThisMonthFullTotal), /* full total across ALL prospective customers this month, not just the top 10 shown — used in the heading */
     topCustomersThisYear  : topNFromMap(topCustomersThisYearMap, 10),
+    topCustomersThisYearTotal : Math.round(topCustomersThisYearFullTotal), /* same, for the full year window */
     stateWiseProspective  : topNFromMap(stateWiseProspectiveMap, 999), /* all states, not just top 10 (graph shows every state); unresolved entries like Nepal are skipped entirely, not shown */
+    stateWiseProspectiveTotal : sumMapField(stateWiseProspectiveMap, "value"), /* total prospective-customer count across every state */
     cityWiseProspective   : topNFromMap(cityWiseProspectiveMap, 20),  /* top 20 cities only, by count */
+    cityWiseProspectiveTotal : sumMapField(cityWiseProspectiveMap, "value"), /* total count across EVERY city, not just the top 20 shown */
     stateWiseTopSaleCapex       : topNAmountQty(stateWiseTopSaleCapexMap, 10),
+    stateWiseTopSaleCapexTotal       : sumMapField(stateWiseTopSaleCapexMap, "amount"),
     stateWiseTopSaleConsumables : topNAmountQty(stateWiseTopSaleConsumablesMap, 10),
+    stateWiseTopSaleConsumablesTotal : sumMapField(stateWiseTopSaleConsumablesMap, "amount"),
     cityWiseTopSaleCapex       : topNAmountQty(cityWiseTopSaleCapexMap, 10),
+    cityWiseTopSaleCapexTotal       : sumMapField(cityWiseTopSaleCapexMap, "amount"),
     cityWiseTopSaleConsumables : topNAmountQty(cityWiseTopSaleConsumablesMap, 10),
-    topCustomersBySale    : topNFromMap(topCustomersBySaleMap, 10)
+    cityWiseTopSaleConsumablesTotal : sumMapField(cityWiseTopSaleConsumablesMap, "amount"),
+    topCustomersBySale    : topNFromMap(topCustomersBySaleMap, 10),
+    topCustomersBySaleTotal : sumMapField(topCustomersBySaleMap, "value")
   };
 }
 
