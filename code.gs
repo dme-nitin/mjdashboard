@@ -2789,6 +2789,82 @@ function getSaleTrendProductWise() {
     productMap[model].monthly[key].amount += amount;
   });
 
+  /* ══════════════════════════════════════════════════
+     MJ "Sale Trend (Product Wise)" panel ONLY — two explicit,
+     hardcoded overrides that apply nowhere else in the file (This
+     Month Sale, Total Sale YTD, and every Analysis-section graph
+     all keep using the sheet real EU cell color, unaffected):
+
+     1. CATEGORY OVERRIDE — these two products are forced into
+        Consumables here regardless of what color their EU cell
+        actually has in the sheet, per explicit requirement.
+     2. FIXED ROW ORDER — replaces the normal alphabetical sort
+        with the exact sequence given, for both Capex and
+        Consumables.
+
+     Matching is FUZZY (bidirectional substring containment,
+     case-insensitive) rather than exact-string, since the actual
+     product name typed in the sheet may not match the given list
+     word-for-word (e.g. sheet might say "Fibroscan" while the
+     list says "Fibroscan Sale") — the ACTUAL sheet name is never
+     changed or renamed, only matched against to determine
+     placement. Any product that matches nothing in a given list
+     still shows up (never silently dropped) — it is simply
+     appended after the named ones, sorted alphabetically among
+     itself. */
+  function fuzzyMatches(productLower, keyword) {
+    return productLower.indexOf(keyword) !== -1 || keyword.indexOf(productLower) !== -1;
+  }
+
+  /* Confirmed via testSaleTrendProductNames() Execution Log output
+     that the ACTUAL sheet spellings differ from what was
+     originally requested:
+       requested "CHOLEDOCHOSCOPE" → sheet actually has
+         "CHOLEDOSCHOSCOPE" (extra "S")
+       requested "ZPH CHATTER"     → sheet actually has
+         "ZPH CATHETER" (Catheter, not Chatter)
+     Matching on "choledo" + "scope" together (rather than the
+     exact misspelled/correct word) makes this robust to EITHER
+     spelling appearing in the sheet in the future. "zph" +
+     "catheter" together (not "catheter" alone) avoids accidentally
+     also catching other real catheter products like "Manoscan
+     Catheter" or "Endoflip Cath". */
+  function isCholedochoscopeOrZphChatter(productLower) {
+    if (productLower.indexOf("choledo") !== -1 && productLower.indexOf("scope") !== -1) return true;
+    if (productLower.indexOf("zph") !== -1 && productLower.indexOf("cath") !== -1) return true;
+    return false;
+  }
+
+  var SALE_TREND_CAPEX_ORDER = [
+    "fibroscan sale", "manoscan", "endoflip", "ehl", "capsule endo w/station",
+    "abt device", "hbt device", "flurocare", "digitrapper", "inbody",
+    "heppabuddy", "gi genius", "ondal", "esaote"
+  ];
+  var SALE_TREND_CONSUMABLES_ORDER = [
+    "capsule", "antenna", "abt kits", "hbt kits", "fecal cal",
+    "digitrapper catheter", "endoflip catheter", "manoscan consumables",
+    "nexpowder", "sharkcore beacon eus", "choledo", "ehl probe",
+    "hepabuddy", "zph cath"
+  ];
+
+  function findFuzzyOrderIndex(productLower, orderList) {
+    for (var i = 0; i < orderList.length; i++) {
+      if (fuzzyMatches(productLower, orderList[i])) return i;
+    }
+    return -1;
+  }
+
+  function sortBySaleTrendOrder(products, orderList) {
+    return products.slice().sort(function(a, b) {
+      var ia = findFuzzyOrderIndex(a.product.toLowerCase(), orderList);
+      var ib = findFuzzyOrderIndex(b.product.toLowerCase(), orderList);
+      if (ia === -1 && ib === -1) return a.product.localeCompare(b.product);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  }
+
   var capexProducts = [], consumableProducts = [], otherProducts = [];
   Object.keys(productMap).forEach(function(model) {
     var p = productMap[model];
@@ -2798,13 +2874,17 @@ function getSaleTrendProductWise() {
       return { qty: Math.round(d.qty), amount: Math.round(d.amount) };
     });
     var row = { product: model, monthly: monthly };
-    if (p.color === "yellow") consumableProducts.push(row);
-    else if (p.color === "red") otherProducts.push(row);
+
+    var isForcedConsumable = isCholedochoscopeOrZphChatter(model.toLowerCase());
+    var effectiveColor = isForcedConsumable ? "yellow" : p.color;
+
+    if (effectiveColor === "yellow") consumableProducts.push(row);
+    else if (effectiveColor === "red") otherProducts.push(row);
     else capexProducts.push(row);
   });
 
-  capexProducts.sort(function(a, b) { return a.product.localeCompare(b.product); });
-  consumableProducts.sort(function(a, b) { return a.product.localeCompare(b.product); });
+  capexProducts       = sortBySaleTrendOrder(capexProducts, SALE_TREND_CAPEX_ORDER);
+  consumableProducts  = sortBySaleTrendOrder(consumableProducts, SALE_TREND_CONSUMABLES_ORDER);
   otherProducts.sort(function(a, b) { return a.product.localeCompare(b.product); });
 
   return {
@@ -5948,6 +6028,60 @@ function testStateWiseProspectiveUnknown() {
   Logger.log("=== DISTINCT city values falling into Unknown (sorted by count) — " + sortedUnknowns.length + " distinct values ===");
   sortedUnknowns.forEach(function(u) {
     Logger.log("'" + u.original + "' → " + u.count + " row(s)");
+  });
+}
+
+/* ══════════════════════════════════════════════════
+   testSaleTrendProductNames()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Lists EVERY DISTINCT EU (Model) value from Report!EQ:EX, its
+   classified color (white/yellow/red), and whether it matches
+   one of the hardcoded Sale Trend order lists (SALE_TREND_
+   CAPEX_ORDER / SALE_TREND_CONSUMABLES_ORDER / the CHOLEDOCHOSCOPE/
+   ZPH CHATTER override) — use this to find EXACT spelling
+   mismatches between what's typed in the sheet and what's
+   hardcoded in getSaleTrendProductWise().
+══════════════════════════════════════════════════ */
+function testSaleTrendProductNames() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var range = rep.getRange(2, 147, lastRow - 1, 8); /* EQ=147, 8 cols through EX=154 */
+  var data = range.getValues();
+  var backgrounds = range.getBackgrounds();
+
+  var CAPEX_ORDER = [
+    "fibroscan sale", "manoscan", "endoflip", "ehl", "capsule endo w/station",
+    "abt device", "hbt device", "flurocare", "digitrapper", "inbody",
+    "heppabuddy", "gi genius", "ondal", "esaote"
+  ];
+  var CONSUMABLES_ORDER = [
+    "capsule", "antenna", "abt kits", "hbt kits", "fecal cal",
+    "digitrapper catheter", "endoflip catheter", "manoscan consumables",
+    "nexpowder", "sharkcore beacon eus", "choledochoscope", "ehl probe",
+    "hepabuddy", "zph chatter"
+  ];
+
+  var seen = {};
+  data.forEach(function(r, idx) {
+    var model = String(r[4] || "").trim(); /* EU */
+    if (!model) return;
+    var key = model.toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+
+    var color = classifyEuBgColor(backgrounds[idx][4]);
+    var inCapexList = CAPEX_ORDER.indexOf(key) !== -1;
+    var inConsumablesList = CONSUMABLES_ORDER.indexOf(key) !== -1;
+
+    Logger.log("Model=[" + model + "] color=" + color +
+               " | matchesCapexOrderList=" + inCapexList +
+               " | matchesConsumablesOrderList=" + inConsumablesList);
   });
 }
 
