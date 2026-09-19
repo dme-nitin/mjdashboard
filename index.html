@@ -908,37 +908,74 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">1. Top 10 Customers This Month</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">1. top 10 prospective customers this month (all expected sale)</div>
+      <div id="totalTopCustomersThisMonth" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
     <div style="position:relative;height:340px;"><canvas id="chartTopCustomersThisMonth"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">2. Top 10 Customers This Year</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">2. top 10 prospective customers this year (all expected sale)</div>
+      <div id="totalTopCustomersThisYear" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
     <div style="position:relative;height:340px;"><canvas id="chartTopCustomersThisYear"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">3. State Wise Prospective</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">3. state wise prospective ytd (prospective customer)</div>
+      <div id="totalStateWiseProspective" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
     <div style="position:relative;height:340px;"><canvas id="chartStateWiseProspective"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">4. City Wise Prospective</div>
-    <div style="position:relative;height:340px;"><canvas id="chartCityWiseProspective"></canvas></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">4. city wise prospective (prospective customer)</div>
+      <div id="totalCityWiseProspective" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:460px;"><canvas id="chartCityWiseProspective"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">5. State Wise Top 10 Sale</div>
-    <div style="position:relative;height:340px;"><canvas id="chartStateWiseTopSale"></canvas></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">5.a state wise top 10 sale (capex) (sale)</div>
+      <div id="totalStateWiseTopSaleCapex" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:380px;"><canvas id="chartStateWiseTopSaleCapex"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">6. City Wise Top 10 Sale</div>
-    <div style="position:relative;height:340px;"><canvas id="chartCityWiseTopSale"></canvas></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">5.b state wise top 10 sale (consumables) (sale)</div>
+      <div id="totalStateWiseTopSaleConsumables" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:380px;"><canvas id="chartStateWiseTopSaleConsumables"></canvas></div>
   </div>
 
   <div class="panel" style="margin-top:16px;">
-    <div class="sec-h" style="margin-bottom:10px;">7. Top 10 Customers — Sale Wise</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">6.a city wise top 10 sale (capex) (sale)</div>
+      <div id="totalCityWiseTopSaleCapex" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:380px;"><canvas id="chartCityWiseTopSaleCapex"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">6.b city wise top 10 sale (consumables) (sale)</div>
+      <div id="totalCityWiseTopSaleConsumables" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:340px;"><canvas id="chartCityWiseTopSaleConsumables"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">7. top 10 customers as per sale value ytd (sale)</div>
+      <div id="totalTopCustomersBySale" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
     <div style="position:relative;height:340px;"><canvas id="chartTopCustomersBySale"></canvas></div>
   </div>
 </div>
@@ -3804,7 +3841,7 @@ function hideAnalysisSection() {
 
 function fetchAnalysisData() {
   const canvasIds = ['chartTopCustomersThisMonth','chartTopCustomersThisYear','chartStateWiseProspective',
-    'chartCityWiseProspective','chartStateWiseTopSale','chartCityWiseTopSale','chartTopCustomersBySale'];
+    'chartCityWiseProspective','chartStateWiseTopSaleCapex','chartStateWiseTopSaleConsumables','chartCityWiseTopSaleCapex','chartCityWiseTopSaleConsumables','chartTopCustomersBySale'];
   canvasIds.forEach(function(id) {
     const c = document.getElementById(id);
     if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
@@ -3920,15 +3957,140 @@ function renderBarChart(canvasId, rows, isMoney, hideXLabels) {
   });
 }
 
+/* Draws a GROUPED bar chart with TWO series per label — Amount
+   (left Y-axis, ₹) and Qty (right Y-axis, plain count) — used by
+   Graphs 5.A/5.B (State Wise Top 10 Sale, split Capex/
+   Consumables) so each state shows both its sale amount AND unit
+   quantity side by side, on appropriately separate scales (Amount
+   is typically in lakhs/crores, Qty is a small integer — plotting
+   them on the same axis would make Qty invisible). `rows` is
+   [{label, amount, qty}, ...]. */
+function renderGroupedBarChart(canvasId, rows) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (analysisChartInstances[canvasId]) {
+    analysisChartInstances[canvasId].destroy();
+    delete analysisChartInstances[canvasId];
+  }
+
+  if (!rows || !rows.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '12px Inter, sans-serif';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data available', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const labels    = rows.map(function(r) { return r.label; });
+  const amounts   = rows.map(function(r) { return r.amount; });
+  const qtys      = rows.map(function(r) { return r.qty; });
+  const products  = rows.map(function(r) { return r.products || ''; });
+
+  analysisChartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Amount', data: amounts, backgroundColor: '#2563EB', borderRadius: 4, yAxisID: 'yAmount', categoryPercentage: 0.7, barPercentage: 1.0 },
+        { label: 'Qty',    data: qtys,    backgroundColor: '#F59E0B', borderRadius: 4, yAxisID: 'yQty', categoryPercentage: 0.7, barPercentage: 1.0 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.dataset.label === 'Amount') {
+                return 'Amount: ' + fmtRupeeShort(ctx.parsed.y);
+              }
+              /* Qty — number first, product names listed on the
+                 line(s) right below it (Chart.js renders an array
+                 return as multiple tooltip lines). */
+              var lines = ['Qty: ' + ctx.parsed.y.toLocaleString('en-IN')];
+              var productList = products[ctx.dataIndex];
+              if (productList) lines.push('Products: ' + productList);
+              return lines;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#0F172A', font: { size: 10.5, weight: '500' }, maxRotation: 45, minRotation: 0, autoSkip: false }
+        },
+        yAmount: {
+          type: 'linear',
+          position: 'left',
+          beginAtZero: true,
+          grid: { color: '#E2E8F0' },
+          title: { display: true, text: 'Amount', color: '#2563EB', font: { size: 10.5 } },
+          ticks: { color: '#2563EB', font: { size: 10 }, callback: function(val) { return fmtRupeeShort(val); } }
+        },
+        yQty: {
+          type: 'linear',
+          position: 'right',
+          beginAtZero: true,
+          grid: { display: false },
+          title: { display: true, text: 'Qty', color: '#B45309', font: { size: 10.5 } },
+          ticks: { color: '#B45309', font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
 function renderAnalysisCharts(data) {
   if (!data) return;
+
+  /* Sets the right-side total for one panel. `isCount` = true for
+     the two Prospective-count graphs (plain number of customers,
+     not currency); everything else is a ₹ amount. */
+  function setTotal(elId, value, isCount) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = 'Total: ' + (isCount ? Number(value || 0).toLocaleString('en-IN') : fmtRupeeShort(value || 0));
+  }
+
   renderBarChart('chartTopCustomersThisMonth', data.topCustomersThisMonth, true);
+  setTotal('totalTopCustomersThisMonth', data.topCustomersThisMonthTotal, false);
+
   renderBarChart('chartTopCustomersThisYear',  data.topCustomersThisYear,  true);
+  setTotal('totalTopCustomersThisYear', data.topCustomersThisYearTotal, false);
+
   renderBarChart('chartStateWiseProspective',  data.stateWiseProspective,  false);
-  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false, true);
-  renderBarChart('chartStateWiseTopSale',      data.stateWiseTopSale,      true);
-  renderBarChart('chartCityWiseTopSale',       data.cityWiseTopSale,       true);
+  setTotal('totalStateWiseProspective', data.stateWiseProspectiveTotal, true);
+
+  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false, false);
+  setTotal('totalCityWiseProspective', data.cityWiseProspectiveTotal, true);
+
+  renderGroupedBarChart('chartStateWiseTopSaleCapex', data.stateWiseTopSaleCapex);
+  setTotal('totalStateWiseTopSaleCapex', data.stateWiseTopSaleCapexTotal, false);
+
+  /* 5.B — Amount only (Qty removed per requirement) — reuses the
+     simple single-series renderBarChart(), mapping {label,amount}
+     to the {label,value} shape it expects. */
+  renderBarChart('chartStateWiseTopSaleConsumables',
+    (data.stateWiseTopSaleConsumables || []).map(function(r) { return { label: r.label, value: r.amount }; }),
+    true);
+  setTotal('totalStateWiseTopSaleConsumables', data.stateWiseTopSaleConsumablesTotal, false);
+
+  renderGroupedBarChart('chartCityWiseTopSaleCapex', data.cityWiseTopSaleCapex);
+  setTotal('totalCityWiseTopSaleCapex', data.cityWiseTopSaleCapexTotal, false);
+
+  renderBarChart('chartCityWiseTopSaleConsumables',
+    (data.cityWiseTopSaleConsumables || []).map(function(r) { return { label: r.label, value: r.amount }; }),
+    true);
+  setTotal('totalCityWiseTopSaleConsumables', data.cityWiseTopSaleConsumablesTotal, false);
+
   renderBarChart('chartTopCustomersBySale',    data.topCustomersBySale,    true);
+  setTotal('totalTopCustomersBySale', data.topCustomersBySaleTotal, false);
 }
 
 function fetchUniqueAddedMonthReport() {
