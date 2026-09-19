@@ -1434,12 +1434,28 @@ var INDIAN_STATES = [
   "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
   "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab",
   "Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh",
-  "Uttarakhand","West Bengal","Andaman and Nicobar Islands","Chandigarh",
+  "Uttarakhand","West Bengal","Andaman and Nicobar Islands",
   "Dadra and Nagar Haveli and Daman and Diu","Delhi","Jammu and Kashmir","Ladakh",
-  "Lakshadweep","Puducherry","NCR","National Capital Region"
+  "Lakshadweep","Puducherry"
 ];
 
-/* Fixed reference city → state lookup (major Indian cities). Used
+/* Common state abbreviations seen in the sheet (e.g. "Indore, MP",
+   "Chennai, TN") — resolved the same way full state names are. */
+var STATE_ABBREVIATIONS = {
+  "mp":"Madhya Pradesh", "up":"Uttar Pradesh", "tn":"Tamil Nadu", "ap":"Andhra Pradesh",
+  "hp":"Himachal Pradesh", "j&k":"Jammu and Kashmir", "jk":"Jammu and Kashmir",
+  "wb":"West Bengal", "mh":"Maharashtra", "rj":"Rajasthan", "gj":"Gujarat",
+  "ka":"Karnataka", "kl":"Kerala", "kerela":"Kerala", "pb":"Punjab", "hr":"Haryana",
+  "or":"Odisha", "od":"Odisha", "jh":"Jharkhand", "cg":"Chhattisgarh",
+  "chattisgarh":"Chhattisgarh", "br":"Bihar", "as":"Assam",
+  "mn":"Manipur", "ml":"Meghalaya", "mz":"Mizoram", "sk":"Sikkim",
+  "tr":"Tripura", "ar":"Arunachal Pradesh", "ga":"Goa", "tg":"Telangana", "ts":"Telangana",
+  "dl":"Delhi", "ncr":"Delhi", "delhi ncr":"Delhi", "national capital region":"Delhi", "uk":"Uttarakhand", "ut":"Uttarakhand"
+};
+
+/* Fixed reference city → state lookup (major Indian cities, PLUS
+   common misspellings/variants and frequently-seen Delhi
+   localities actually found in this sheet's BU/ES columns). Used
    to resolve City Name to its State for Graph 3 (State Wise
    Prospective) and Graph 5 (State Wise Top 10 Sale). This is
    geographic reference data (not sheet-specific business data),
@@ -1451,60 +1467,153 @@ var CITY_TO_STATE = {
   "mumbai":"Maharashtra","pune":"Maharashtra","nagpur":"Maharashtra","nashik":"Maharashtra",
   "thane":"Maharashtra","aurangabad":"Maharashtra","kolhapur":"Maharashtra","solapur":"Maharashtra",
   "navi mumbai":"Maharashtra","vasai":"Maharashtra","pimpri":"Maharashtra","pimpri-chinchwad":"Maharashtra",
-  "delhi":"Delhi","new delhi":"Delhi",
+  "sangli":"Maharashtra","mulund":"Maharashtra","ahmednagar":"Maharashtra","nanded":"Maharashtra","wardha":"Maharashtra",
+  "delhi":"Delhi","new delhi":"Delhi","dwarka":"Delhi","ito":"Delhi","malka ganj":"Delhi",
+  "dilsad garden":"Delhi","dilshad garden":"Delhi","shalimar bagh":"Delhi","kaushik enclave":"Delhi",
+  "kaushik enlcav":"Delhi","punjabi bagh":"Delhi","vasant kunj":"Delhi","saket":"Delhi","okhla":"Delhi",
+  "shreshtha vihar":"Delhi","delhi rohini":"Delhi","rohini":"Delhi","noiida":"Uttar Pradesh",
+  "punjbi bagh":"Delhi","channi":"Jammu and Kashmir","shastri nagar":"Delhi","patel nagar":"Delhi",
   "bangalore":"Karnataka","bengaluru":"Karnataka","mysore":"Karnataka","mysuru":"Karnataka",
-  "hubli":"Karnataka","mangalore":"Karnataka","belgaum":"Karnataka",
+  "hubli":"Karnataka","mangalore":"Karnataka","belgaum":"Karnataka","hospet":"Karnataka",
+  "devengere":"Karnataka","davangere":"Karnataka","tumkur":"Karnataka","kolar":"Karnataka",
   "chennai":"Tamil Nadu","coimbatore":"Tamil Nadu","madurai":"Tamil Nadu","trichy":"Tamil Nadu",
   "tiruchirapalli":"Tamil Nadu","salem":"Tamil Nadu","erode":"Tamil Nadu","vellore":"Tamil Nadu",
-  "hyderabad":"Telangana","warangal":"Telangana","secunderabad":"Telangana",
-  "kolkata":"West Bengal","howrah":"West Bengal","siliguri":"West Bengal","durgapur":"West Bengal","asansol":"West Bengal",
-  "ahmedabad":"Gujarat","surat":"Gujarat","vadodara":"Gujarat","rajkot":"Gujarat","gandhinagar":"Gujarat","bhavnagar":"Gujarat",
-  "jaipur":"Rajasthan","jodhpur":"Rajasthan","udaipur":"Rajasthan","kota":"Rajasthan","ajmer":"Rajasthan","bikaner":"Rajasthan",
+  "vellorw":"Tamil Nadu","tirunelveli":"Tamil Nadu","rajapalayam":"Tamil Nadu",
+  "hyderabad":"Telangana","warangal":"Telangana","secunderabad":"Telangana","khammam":"Telangana",
+  "kolkata":"West Bengal","kolkatta":"West Bengal","howrah":"West Bengal","siliguri":"West Bengal",
+  "durgapur":"West Bengal","asansol":"West Bengal",
+  "ahmedabad":"Gujarat","surat":"Gujarat","vadodara":"Gujarat","rajkot":"Gujarat",
+  "gandhinagar":"Gujarat","bhavnagar":"Gujarat","palanpur":"Gujarat",
+  "jaipur":"Rajasthan","jodhpur":"Rajasthan","udaipur":"Rajasthan","kota":"Rajasthan",
+  "ajmer":"Rajasthan","bikaner":"Rajasthan","alwar":"Rajasthan","hanumangarh":"Rajasthan",
+  "sri ganganagar":"Rajasthan",
   "lucknow":"Uttar Pradesh","kanpur":"Uttar Pradesh","varanasi":"Uttar Pradesh","agra":"Uttar Pradesh",
   "allahabad":"Uttar Pradesh","prayagraj":"Uttar Pradesh","noida":"Uttar Pradesh","ghaziabad":"Uttar Pradesh",
-  "meerut":"Uttar Pradesh","bareilly":"Uttar Pradesh","aligarh":"Uttar Pradesh","moradabad":"Uttar Pradesh",
-  "gorakhpur":"Uttar Pradesh","greater noida":"Uttar Pradesh",
-  "patna":"Bihar","gaya":"Bihar","muzaffarpur":"Bihar","bhagalpur":"Bihar",
-  "bhopal":"Madhya Pradesh","indore":"Madhya Pradesh","gwalior":"Madhya Pradesh","jabalpur":"Madhya Pradesh","ujjain":"Madhya Pradesh",
-  "chandigarh":"Chandigarh",
-  "amritsar":"Punjab","ludhiana":"Punjab","jalandhar":"Punjab","patiala":"Punjab","mohali":"Punjab","bathinda":"Punjab",
+  "meerut":"Uttar Pradesh","bareilly":"Uttar Pradesh","barielly":"Uttar Pradesh","aligarh":"Uttar Pradesh",
+  "moradabad":"Uttar Pradesh","gorakhpur":"Uttar Pradesh","greater noida":"Uttar Pradesh",
+  "pilkhuwa":"Uttar Pradesh","ayodhya":"Uttar Pradesh","jhansi":"Uttar Pradesh","indirapuram":"Uttar Pradesh",
+  "azamgarh":"Uttar Pradesh","mathura":"Uttar Pradesh","gonda":"Uttar Pradesh",
+  "patna":"Bihar","gaya":"Bihar","muzaffarpur":"Bihar","bhagalpur":"Bihar","purnea":"Bihar",
+  "bhopal":"Madhya Pradesh","indore":"Madhya Pradesh","gwalior":"Madhya Pradesh",
+  "jabalpur":"Madhya Pradesh","ujjain":"Madhya Pradesh","rewa":"Madhya Pradesh",
+  "chandigarh":"Punjab",
+  "amritsar":"Punjab","ludhiana":"Punjab","jalandhar":"Punjab","patiala":"Punjab","mohali":"Punjab",
+  "mohli":"Punjab","bathinda":"Punjab","bhatinda":"Punjab","pathankot":"Punjab","phagwara":"Punjab",
+  "gurdaspur":"Punjab","gudaspur":"Punjab","hoshiarpur":"Punjab","mansa":"Punjab",
+  "sangrur":"Punjab","kharar":"Punjab","zirakpur":"Punjab",
   "gurgaon":"Haryana","gurugram":"Haryana","faridabad":"Haryana","panipat":"Haryana","hisar":"Haryana",
-  "karnal":"Haryana","rohtak":"Haryana","ambala":"Haryana",
-  "bhubaneswar":"Odisha","cuttack":"Odisha","rourkela":"Odisha",
-  "guwahati":"Assam","dibrugarh":"Assam","silchar":"Assam",
-  "ranchi":"Jharkhand","jamshedpur":"Jharkhand","dhanbad":"Jharkhand","bokaro":"Jharkhand",
+  "karnal":"Haryana","rohtak":"Haryana","ambala":"Haryana","kaithal":"Haryana","sonipat":"Haryana",
+  "bahadurgarh":"Haryana","bhiwani":"Haryana","panchkula":"Haryana","manesar":"Haryana","maneshar":"Haryana",
+  "bhubaneswar":"Odisha","bhubaneshwar":"Odisha","cuttack":"Odisha","cuttuk":"Odisha",
+  "rourkela":"Odisha","balasore":"Odisha",
+  "guwahati":"Assam","dibrugarh":"Assam","silchar":"Assam","nagaon":"Assam",
+  "ranchi":"Jharkhand","jamshedpur":"Jharkhand","dhanbad":"Jharkhand","bokaro":"Jharkhand","ramgarh":"Jharkhand",
   "raipur":"Chhattisgarh","bhilai":"Chhattisgarh","bilaspur":"Chhattisgarh",
   "thiruvananthapuram":"Kerala","trivandrum":"Kerala","kochi":"Kerala","cochin":"Kerala",
   "kozhikode":"Kerala","calicut":"Kerala","thrissur":"Kerala","kollam":"Kerala",
+  "thiruvalla":"Kerala","palakkad":"Kerala",
   "dehradun":"Uttarakhand","haridwar":"Uttarakhand","rishikesh":"Uttarakhand","roorkee":"Uttarakhand",
-  "shimla":"Himachal Pradesh","manali":"Himachal Pradesh",
-  "srinagar":"Jammu and Kashmir","jammu":"Jammu and Kashmir",
+  "haldwani":"Uttarakhand","kashipur":"Uttarakhand","vikasnagar":"Uttarakhand",
+  "shimla":"Himachal Pradesh","manali":"Himachal Pradesh","kangra":"Himachal Pradesh",
+  "mandi":"Himachal Pradesh","una":"Himachal Pradesh",
+  "srinagar":"Jammu and Kashmir","srinsger":"Jammu and Kashmir","jammu":"Jammu and Kashmir",
+  "pulwama":"Jammu and Kashmir","akhnoor":"Jammu and Kashmir","anantnag":"Jammu and Kashmir",
+  "udhampur":"Jammu and Kashmir","kathua":"Jammu and Kashmir","katra":"Jammu and Kashmir",
+  "baramulla":"Jammu and Kashmir","sidhra":"Jammu and Kashmir","bathindi":"Jammu and Kashmir","rs pura":"Jammu and Kashmir",
   "panaji":"Goa","panjim":"Goa","margao":"Goa",
   "guntur":"Andhra Pradesh","vijayawada":"Andhra Pradesh","visakhapatnam":"Andhra Pradesh",
-  "vizag":"Andhra Pradesh","tirupati":"Andhra Pradesh","nellore":"Andhra Pradesh",
+  "vizag":"Andhra Pradesh","tirupati":"Andhra Pradesh","nellore":"Andhra Pradesh","kurnool":"Andhra Pradesh",
+  "jopdhpur":"Rajasthan","sohana":"Haryana","amravati":"Maharashtra","kaushambi":"Uttar Pradesh",
+  "kashmir":"Jammu and Kashmir","palwal":"Haryana","patliputa":"Bihar",
   "imphal":"Manipur","shillong":"Meghalaya","aizawl":"Mizoram","kohima":"Nagaland",
-  "itanagar":"Arunachal Pradesh","gangtok":"Sikkim","agartala":"Tripura",
+  "itanagar":"Arunachal Pradesh","naharlagun":"Arunachal Pradesh","gangtok":"Sikkim","agartala":"Tripura",
   "puducherry":"Puducherry","pondicherry":"Puducherry"
 };
 
-/* Resolves an ES/BU-style location string to its State, using
-   INDIAN_STATES (direct match) then CITY_TO_STATE (city lookup).
-   Returns { type: "state"|"city"|"unknown", state, city }. Never
-   guesses — an unrecognized value is explicitly "unknown" so it
-   can be bucketed separately instead of silently mis-assigned. */
+/* Resolves an ES/BU-style location string to its State. Tries, in
+   order: (1) direct full-state-name match, (2) direct state-
+   abbreviation match, (3) direct known-city match, (4) a
+   comma-separated compound like "Indore, MP" or "Chennai, TN"
+   (resolves the part after the comma as the state, using the
+   part before it as the city name), (5) a space-separated
+   compound with a state name/abbreviation at the very start or
+   end (e.g. "Kaithal Haryana", "HARYANA ROHTAK"), (6) any
+   recognized city or state name appearing anywhere as a whole
+   word inside the string (e.g. "Chembur Mumbai", "Jollygrant
+   Dehradun", "Vasant kunj Delhi"). Returns
+   { type: "state"|"city"|"unknown", state, city }. Never
+   guesses beyond these concrete pattern matches — anything still
+   unresolved is explicitly "unknown". */
 function resolveIndianLocation(raw) {
-  var trimmed = String(raw || "").trim();
+  var result = resolveIndianLocationRaw(raw);
+  /* Display-only relabel: "Delhi" and "NCR"/"National Capital
+     Region" are merged into the same underlying state match (see
+     INDIAN_STATES/STATE_ABBREVIATIONS above) — shown as "Delhi /
+     NCR" everywhere, since the merge is exactly why the two were
+     combined in the first place. */
+  if (result.state === "Delhi") result.state = "Delhi / NCR";
+  return result;
+}
+
+function resolveIndianLocationRaw(raw) {
+  var trimmed = String(raw || "").trim().replace(/\.+$/, "").replace(/,\s*$/, "");
   if (!trimmed) return { type: "unknown", state: null, city: null };
   var lower = trimmed.toLowerCase();
 
-  for (var i = 0; i < INDIAN_STATES.length; i++) {
-    if (INDIAN_STATES[i].toLowerCase() === lower) {
-      return { type: "state", state: INDIAN_STATES[i], city: null };
+  function matchState(text) {
+    for (var i = 0; i < INDIAN_STATES.length; i++) {
+      if (INDIAN_STATES[i].toLowerCase() === text) return INDIAN_STATES[i];
+    }
+    if (STATE_ABBREVIATIONS[text]) return STATE_ABBREVIATIONS[text];
+    return null;
+  }
+
+  /* 1+2. Direct state / abbreviation match */
+  var directState = matchState(lower);
+  if (directState) return { type: "state", state: directState, city: null };
+
+  /* 3. Direct known-city match */
+  if (CITY_TO_STATE[lower]) return { type: "city", state: CITY_TO_STATE[lower], city: trimmed };
+
+  /* 4. Comma-separated "City, State"/"City, ABBR" */
+  if (trimmed.indexOf(",") !== -1) {
+    var parts = trimmed.split(",").map(function(p) { return p.trim(); }).filter(Boolean);
+    if (parts.length >= 2) {
+      var lastLower  = parts[parts.length - 1].toLowerCase();
+      var firstLower = parts[0].toLowerCase();
+      var st = matchState(lastLower);
+      if (st) return { type: "city", state: st, city: parts[0] };
+      if (CITY_TO_STATE[lastLower])  return { type: "city", state: CITY_TO_STATE[lastLower],  city: parts[parts.length - 1] };
+      if (CITY_TO_STATE[firstLower]) return { type: "city", state: CITY_TO_STATE[firstLower], city: parts[0] };
     }
   }
-  if (CITY_TO_STATE[lower]) {
-    return { type: "city", state: CITY_TO_STATE[lower], city: trimmed };
+
+  /* 5. Space-separated compound with a state/abbreviation as the
+     LAST word or FIRST word (e.g. "Kaithal Haryana", "HARYANA ROHTAK") */
+  var words = lower.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    var lastWord  = words[words.length - 1];
+    var firstWord = words[0];
+    var stLast  = matchState(lastWord);
+    if (stLast) return { type: "city", state: stLast, city: trimmed.split(/\s+/).slice(0, -1).join(" ") };
+    var stFirst = matchState(firstWord);
+    if (stFirst) return { type: "city", state: stFirst, city: trimmed.split(/\s+/).slice(1).join(" ") };
   }
+
+  /* 6. Any recognized city or state name appearing anywhere as a
+     whole word inside the string (handles "Chembur Mumbai",
+     "Jollygrant Dehradun", "Vasant kunj Delhi", "Sector 62 Noida",
+     "BG Road , Bangalore", etc.) — scanned from the END, since the
+     city/area name is usually the LAST word in these patterns. */
+  var flatWords = lower.replace(/,/g, " ").split(/\s+/).filter(Boolean);
+  for (var w = flatWords.length - 1; w >= 0; w--) {
+    if (CITY_TO_STATE[flatWords[w]]) return { type: "city", state: CITY_TO_STATE[flatWords[w]], city: trimmed };
+  }
+  for (var w2 = flatWords.length - 1; w2 >= 0; w2--) {
+    var stWord = matchState(flatWords[w2]);
+    if (stWord) return { type: "city", state: stWord, city: trimmed };
+  }
+
   return { type: "unknown", state: null, city: null };
 }
 
@@ -1514,6 +1623,19 @@ function topNFromMap(map, n) {
     .map(function(k) { return { label: map[k].label || k, value: Math.round(map[k].value) }; })
     .sort(function(a, b) { return b.value - a.value; })
     .slice(0, n);
+}
+
+/* Same as topNFromMap(), but a specific label (e.g. "Nepal" — a
+   deliberately-kept non-Indian bucket, not a real state) is always
+   forced to the very last position in the result, regardless of
+   its value, instead of being sorted in among the real states by
+   size. */
+function topNFromMapWithLastLabel(map, n, lastLabel) {
+  var all = Object.keys(map).map(function(k) { return { label: map[k].label || k, value: Math.round(map[k].value) }; });
+  var special = all.filter(function(r) { return r.label === lastLabel; });
+  var rest = all.filter(function(r) { return r.label !== lastLabel; })
+    .sort(function(a, b) { return b.value - a.value; });
+  return rest.concat(special).slice(0, n + special.length);
 }
 
 /* ══════════════════════════════════════════════════
@@ -1617,7 +1739,8 @@ function getAnalysisData() {
       cityWiseProspectiveMap[cityKey].value += 1;
 
       var loc = resolveIndianLocation(city);
-      var stateLabel = (loc.type === "city") ? loc.state : "Unknown";
+      if (loc.type !== "city" && loc.type !== "state") return; /* unresolved (e.g. Nepal) → skip entirely, no bucket at all */
+      var stateLabel = loc.state;
       var stateKey = stateLabel.toLowerCase();
       if (!stateWiseProspectiveMap[stateKey]) stateWiseProspectiveMap[stateKey] = { label: stateLabel, value: 0 };
       stateWiseProspectiveMap[stateKey].value += 1;
@@ -1629,20 +1752,37 @@ function getAnalysisData() {
      elsewhere in this file:
        ER (col 148, index 1) = Customer Name
        ES (col 149, index 2) = State OR City (mixed — resolved below)
-       ET (col 150, index 3) = Amount W/O GST — the value summed */
-  var stateWiseTopSaleMap  = {};
-  var cityWiseTopSaleMap   = {};
+       ET (col 150, index 3) = Amount W/O GST — the value summed
+       EU (col 151, index 4) = Model — its cell BACKGROUND COLOR is
+                                the Capex(White)/Consumables(Yellow)
+                                signal, via the SAME classifyEuBgColor()
+                                helper already used by getThisMonthSale()/
+                                getTotalSaleYtdRows() elsewhere in this file
+       EV (col 152, index 5) = Qty */
+  var stateWiseTopSaleCapexMap        = {}; /* Graph 5.A */
+  var stateWiseTopSaleConsumablesMap  = {}; /* Graph 5.B */
+  var cityWiseTopSaleCapexMap        = {}; /* Graph 6.A */
+  var cityWiseTopSaleConsumablesMap  = {}; /* Graph 6.B */
   var topCustomersBySaleMap = {};
   try {
-    var eqData = rep.getRange(2, 147, lastRow - 1, 8).getValues();
-    eqData.forEach(function(r) {
+    var eqRange = rep.getRange(2, 147, lastRow - 1, 8);
+    var eqData  = eqRange.getValues();
+    var eqBg    = eqRange.getBackgrounds(); /* same shape; [i][4] = EU cell's background */
+
+    eqData.forEach(function(r, idx) {
       var customer  = String(r[1] || "").trim(); /* ER */
       var esValue   = String(r[2] || "").trim(); /* ES */
       var amountRaw = r[3];                       /* ET */
+      var qtyRaw    = r[5];                        /* EV */
 
       var amount = typeof amountRaw === "number" ? amountRaw
                    : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
       if (amount === 0) return;
+
+      var qty = typeof qtyRaw === "number" ? qtyRaw
+                : (parseFloat(String(qtyRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+
+      var productName = String(r[4] || "").trim(); /* EU */
 
       /* Graph 7 — Top 10 Customers by total Sale Amount */
       if (customer) {
@@ -1654,36 +1794,84 @@ function getAnalysisData() {
       if (!esValue) return;
       var loc = resolveIndianLocation(esValue);
 
-      /* Graph 5 — State Wise Top 10 Sale: ES already a state → use
-         directly; ES a recognized city → resolve to ITS state;
-         unrecognized → bucketed under "Unknown" (restored — fully
-         excluding these caused too large a mismatch against the
-         real total sale amount). */
+      /* Graph 5.A / 5.B — State Wise Top 10 Sale, split by the EU
+         cell's color into Capex (white) vs Consumables (yellow).
+         Rows classified "red" (Others) are intentionally excluded
+         from BOTH 5.A and 5.B, per the requirement (only Capex and
+         Consumables requested). ES already a state → use directly;
+         ES a recognized city → resolve to ITS state; unrecognized
+         → bucketed under "Unknown" (this is a DIFFERENT data range
+         from Graph 3's BR:BW — its unresolved entries were never
+         confirmed to actually be Nepal, so it must NOT reuse that
+         label; "Unknown" here just means "couldn't determine a
+         state from ES", nothing more specific). */
       var stateLabel5 = loc.type === "state" ? loc.state
                           : loc.type === "city" ? loc.state
                           : "Unknown";
       var stateKey5 = stateLabel5.toLowerCase();
-      if (!stateWiseTopSaleMap[stateKey5]) stateWiseTopSaleMap[stateKey5] = { label: stateLabel5, value: 0 };
-      stateWiseTopSaleMap[stateKey5].value += amount;
+      var euColor = classifyEuBgColor(eqBg[idx][4]);
 
-      /* Graph 6 — City Wise Top 10 Sale: ONLY rows where ES is a
+      var targetMap = euColor === "white" ? stateWiseTopSaleCapexMap
+                     : euColor === "yellow" ? stateWiseTopSaleConsumablesMap
+                     : null; /* "red" (Others) → excluded from both 5.A and 5.B */
+
+      if (targetMap) {
+        if (!targetMap[stateKey5]) targetMap[stateKey5] = { label: stateLabel5, amount: 0, qty: 0, products: {} };
+        targetMap[stateKey5].amount += amount;
+        targetMap[stateKey5].qty    += qty;
+        /* Capex-only product list, for 5.A's Qty tooltip — every
+           DISTINCT product name sold in this state (across all its
+           rows), not just the row currently being summed. */
+        if (euColor === "white" && productName) targetMap[stateKey5].products[productName] = true;
+      }
+
+      /* Graph 6.A / 6.B — City Wise Top 10 Sale, split by the EU
+         cell's color into Capex (white) vs Consumables (yellow) —
+         same convention as Graph 5.A/5.B. ONLY rows where ES is a
          recognized CITY are included; rows where ES is a state (or
          unrecognized) are excluded entirely, per requirement. */
       if (loc.type === "city") {
         var cityKey = esValue.toLowerCase();
-        if (!cityWiseTopSaleMap[cityKey]) cityWiseTopSaleMap[cityKey] = { label: esValue, value: 0 };
-        cityWiseTopSaleMap[cityKey].value += amount;
+        var cityTargetMap = euColor === "white" ? cityWiseTopSaleCapexMap
+                           : euColor === "yellow" ? cityWiseTopSaleConsumablesMap
+                           : null; /* "red" (Others) → excluded from both 6.A and 6.B */
+        if (cityTargetMap) {
+          if (!cityTargetMap[cityKey]) cityTargetMap[cityKey] = { label: esValue, amount: 0, qty: 0, products: {} };
+          cityTargetMap[cityKey].amount += amount;
+          cityTargetMap[cityKey].qty    += qty;
+          if (euColor === "white" && productName) cityTargetMap[cityKey].products[productName] = true;
+        }
       }
     });
   } catch (e) { Logger.log("getAnalysisData EQ:EX ERROR: " + e.message); }
 
+  /* Graph 5.A/5.B and 6.A/6.B need BOTH amount and qty (a 2-series
+     grouped chart), sorted by amount descending, top 10 — separate
+     from the simple {label,value} shape topNFromMap() produces.
+     `products` (Capex only) is a comma-joined, alphabetically-
+     sorted list of every distinct product sold there, shown in
+     the Qty bar's tooltip. */
+  function topNAmountQty(map, n) {
+    return Object.keys(map)
+      .map(function(k) {
+        var productList = map[k].products
+          ? Object.keys(map[k].products).sort().join(", ")
+          : "";
+        return { label: map[k].label || k, amount: Math.round(map[k].amount), qty: Math.round(map[k].qty), products: productList };
+      })
+      .sort(function(a, b) { return b.amount - a.amount; })
+      .slice(0, n);
+  }
+
   return {
     topCustomersThisMonth : topNFromMap(topCustomersThisMonthMap, 10),
     topCustomersThisYear  : topNFromMap(topCustomersThisYearMap, 10),
-    stateWiseProspective  : topNFromMap(stateWiseProspectiveMap, 999), /* all states, not just top 10 (graph shows every state) */
-    cityWiseProspective   : topNFromMap(cityWiseProspectiveMap, 999),  /* all cities */
-    stateWiseTopSale      : topNFromMap(stateWiseTopSaleMap, 10),
-    cityWiseTopSale       : topNFromMap(cityWiseTopSaleMap, 10),
+    stateWiseProspective  : topNFromMap(stateWiseProspectiveMap, 999), /* all states, not just top 10 (graph shows every state); unresolved entries like Nepal are skipped entirely, not shown */
+    cityWiseProspective   : topNFromMap(cityWiseProspectiveMap, 20),  /* top 20 cities only, by count */
+    stateWiseTopSaleCapex       : topNAmountQty(stateWiseTopSaleCapexMap, 10),
+    stateWiseTopSaleConsumables : topNAmountQty(stateWiseTopSaleConsumablesMap, 10),
+    cityWiseTopSaleCapex       : topNAmountQty(cityWiseTopSaleCapexMap, 10),
+    cityWiseTopSaleConsumables : topNAmountQty(cityWiseTopSaleConsumablesMap, 10),
     topCustomersBySale    : topNFromMap(topCustomersBySaleMap, 10)
   };
 }
@@ -5559,6 +5747,167 @@ function testProductsThisMonth() {
    unparseable HA date, zero/blank amount, or date outside both
    windows) — so we can see definitively why the graphs are blank.
 ══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   testStateWiseProspectiveUnknown()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Runs the EXACT SAME logic as Analysis Graph 3 (State Wise
+   Prospective) against Report!BR:BW's BU (City) column, and logs
+   EVERY DISTINCT city value that falls into the "Unknown" bucket
+   (not found in CITY_TO_STATE), with how many rows each one
+   accounts for — sorted by count descending, so the biggest
+   contributors to that 240 show up first. Use this list to
+   extend CITY_TO_STATE with whatever real city names/spellings
+   are missing.
+══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   testWhatIsInNcrBucket()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Lists every Report!EQ:EX row whose ES value resolves to the
+   "NCR" bucket in Graph 5.A/5.B (State Wise Top 10 Sale) — shows
+   the raw ES text, Customer Name (ER), and Amount (ET) for each,
+   so we can see EXACTLY which rows/customers are being grouped
+   under "NCR" (as opposed to "Delhi").
+══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   testStateWiseTopSaleUnknown()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Runs the EXACT SAME logic as Graph 5.A/5.B (State Wise Top 10
+   Sale) against Report!EQ:EX's ES column, and logs EVERY DISTINCT
+   ES value that falls into the "Unknown" bucket (not resolved as
+   a state or a known city), with how many rows and how much total
+   Amount each one accounts for — sorted by amount descending, so
+   the biggest contributors show up first.
+══════════════════════════════════════════════════ */
+function testStateWiseTopSaleUnknown() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  Logger.log("Last row: " + lastRow);
+
+  var data = rep.getRange(2, 147, lastRow - 1, 8).getValues(); /* EQ=147, 8 cols through EX=154 */
+  Logger.log("Total rows read from EQ:EX: " + data.length);
+
+  var unknownCounts = {}; /* esLower -> { original, count, amount } */
+  var totalWithEs = 0, totalUnknown = 0, totalResolved = 0;
+
+  data.forEach(function(r) {
+    var esValue   = String(r[2] || "").trim(); /* ES */
+    var amountRaw = r[3]; /* ET */
+    if (!esValue) return;
+
+    var amount = typeof amountRaw === "number" ? amountRaw : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) return;
+
+    totalWithEs++;
+    var loc = resolveIndianLocation(esValue);
+    if (loc.type === "state" || loc.type === "city") { totalResolved++; return; }
+
+    totalUnknown++;
+    var key = esValue.toLowerCase();
+    if (!unknownCounts[key]) unknownCounts[key] = { original: esValue, count: 0, amount: 0 };
+    unknownCounts[key].count++;
+    unknownCounts[key].amount += amount;
+  });
+
+  Logger.log("=== SUMMARY ===");
+  Logger.log("Total rows with non-blank ES + non-zero amount: " + totalWithEs);
+  Logger.log("Resolved (state or city): " + totalResolved);
+  Logger.log("Fell into Unknown: " + totalUnknown);
+
+  var sortedUnknowns = Object.keys(unknownCounts)
+    .map(function(k) { return unknownCounts[k]; })
+    .sort(function(a, b) { return b.amount - a.amount; });
+
+  Logger.log("=== DISTINCT ES values falling into Unknown (sorted by amount) — " + sortedUnknowns.length + " distinct values ===");
+  sortedUnknowns.forEach(function(u) {
+    Logger.log("'" + u.original + "' → " + u.count + " row(s), amount=" + Math.round(u.amount));
+  });
+}
+
+function testWhatIsInNcrBucket() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var data = rep.getRange(2, 147, lastRow - 1, 8).getValues(); /* EQ=147, 8 cols through EX=154 */
+
+  var ncrRows = [];
+  data.forEach(function(r, i) {
+    var customer = String(r[1] || "").trim(); /* ER */
+    var esValue  = String(r[2] || "").trim(); /* ES */
+    var amountRaw = r[3]; /* ET */
+    if (!esValue) return;
+
+    var amount = typeof amountRaw === "number" ? amountRaw : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) return;
+
+    var loc = resolveIndianLocation(esValue);
+    var stateLabel = loc.type === "state" ? loc.state : loc.type === "city" ? loc.state : "Unknown";
+
+    if (stateLabel === "Delhi / NCR") {
+      ncrRows.push("Row " + (i+2) + ": ES=[" + esValue + "] customer=[" + customer + "] amount=" + amount);
+    }
+  });
+
+  Logger.log("=== Rows now bucketed as 'Delhi / NCR' (" + ncrRows.length + " rows) ===");
+  ncrRows.forEach(function(s) { Logger.log(s); });
+}
+
+function testStateWiseProspectiveUnknown() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  Logger.log("Last row: " + lastRow);
+
+  var data = rep.getRange(2, 70, lastRow - 1, 6).getValues(); /* BR=70, 6 cols through BW=75 */
+  Logger.log("Total rows read from BR:BW: " + data.length);
+
+  var unknownCounts = {}; /* cityLower -> { original, count } */
+  var totalWithCity = 0, totalUnknown = 0, totalKnown = 0;
+
+  data.forEach(function(r) {
+    var city = String(r[3] || "").trim(); /* BU */
+    if (!city) return;
+    totalWithCity++;
+
+    var loc = resolveIndianLocation(city);
+    if (loc.type === "city") { totalKnown++; return; }
+
+    totalUnknown++;
+    var key = city.toLowerCase();
+    if (!unknownCounts[key]) unknownCounts[key] = { original: city, count: 0 };
+    unknownCounts[key].count++;
+  });
+
+  Logger.log("=== SUMMARY ===");
+  Logger.log("Total rows with a non-blank city: " + totalWithCity);
+  Logger.log("Matched a known city (counted in a real state): " + totalKnown);
+  Logger.log("Fell into Unknown: " + totalUnknown);
+
+  var sortedUnknowns = Object.keys(unknownCounts)
+    .map(function(k) { return unknownCounts[k]; })
+    .sort(function(a, b) { return b.count - a.count; });
+
+  Logger.log("=== DISTINCT city values falling into Unknown (sorted by count) — " + sortedUnknowns.length + " distinct values ===");
+  sortedUnknowns.forEach(function(u) {
+    Logger.log("'" + u.original + "' → " + u.count + " row(s)");
+  });
+}
+
 function testAnalysisGqHa() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
