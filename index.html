@@ -473,6 +473,20 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
   </button>
 </div>
 
+<div id="restricted-rsm-section" style="display:none;">
+  <div class="panel">
+    <div class="sec-h" id="restrictedRsmTitle" style="margin:0;">My Summary</div>
+    <div class="sec-sub" style="margin:4px 0 0;">Personalized view — this link shows only your own numbers and your own team</div>
+  </div>
+  <section class="kpis" id="restrictedRsmKpis" style="grid-template-columns:repeat(4,1fr);margin-top:16px;"></section>
+  <div class="panel" style="margin-top:16px;">
+    <div class="sec-h" style="margin-bottom:12px;">My Sales Executives</div>
+    <select id="restrictedExecSelect" style="width:100%;max-width:360px;padding:9px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--ink3);color:var(--ts);font-family:'Inter',sans-serif;font-weight:500;font-size:13px;cursor:pointer;">
+      <option value="">— Select an executive to view their report —</option>
+    </select>
+  </div>
+</div>
+
 <div id="salesExecSection" style="display:none;">
   <div class="panel" style="display:flex;align-items:center;justify-content:space-between;">
     <div>
@@ -6580,7 +6594,152 @@ function applyLiveData(data, rs) {
   setBadge(data.fromCache ? 'cached' : 'live');
   const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   if (rs) { rs.textContent = (data.fromCache ? '⚡ Cached ' : '✓ Live ') + ts; rs.className = 'rst ok'; }
+  applyRestrictedAccessModeIfNeeded(cR); /* personalized ?restrictExec=/?restrictRsm= links — see definition below */
   return true;
+}
+
+/* ══════════════════════════════════════════════════
+   PERSONALIZED ACCESS LINKS
+   ----------------------------------------------------------------
+   Lets the dashboard be shared with RSMs and Sales Executives
+   WITHOUT giving them the full company-wide report. Two optional
+   URL query parameters, read once from the page's own address bar:
+
+     ?restrictExec=<email>   -> the page shows ONLY that one Sales
+                               Executive's own report (the exact
+                               same detail view normally reached by
+                               picking them from the dropdown), with
+                               no navigation to anything else at all.
+
+     ?restrictRsm=<RSM name> -> the page shows a small "My Summary"
+                               panel with that RSM's own Target/
+                               Sale/Achievement/Pending numbers, plus
+                               a dropdown restricted to ONLY that
+                               RSM's own team - picking a name from
+                               it opens that person's normal detail
+                               view. Every other RSM's data, and
+                               every other dashboard section (MJ,
+                               Accounts, HR, Analysis, etc.), stays
+                               completely hidden and unreachable
+                               from this link.
+
+   Neither parameter is present on the normal, full dashboard link
+   - this whole block does nothing unless one of them is set.
+
+   IMPORTANT - this is a PRIVACY-BY-OBSCURITY mechanism, not a
+   secure login system: no password or Google-account check is
+   involved. Anyone holding a given link sees exactly what it
+   grants, nothing more (they cannot navigate to the full
+   dashboard, other RSMs, or other executives from within a
+   restricted link) - but the link itself isn't access-controlled
+   beyond "you have to know the URL", so it should be shared only
+   with the intended person. */
+function getUrlParam(name) {
+  try { return new URLSearchParams(window.location.search).get(name); }
+  catch (e) { return null; }
+}
+
+const RESTRICT_EXEC_EMAIL = getUrlParam('restrictExec');
+const RESTRICT_RSM_NAME   = getUrlParam('restrictRsm');
+const IS_RESTRICTED_LINK  = !!(RESTRICT_EXEC_EMAIL || RESTRICT_RSM_NAME);
+
+/* Called once at the end of every applyLiveData() run (both the
+   initial auto-load and every "Refresh Data" click) - safe to call
+   repeatedly; does nothing at all unless a restrict* param is
+   present in the URL. */
+function applyRestrictedAccessModeIfNeeded(RS) {
+  if (!IS_RESTRICTED_LINK) return;
+
+  var header = document.querySelector('header.hero');
+  if (header) header.style.display = 'none';
+  var navRow = document.querySelector('.nav-btn-row');
+  if (navRow) navRow.style.display = 'none';
+
+  document.getElementById('mainView').style.display = 'none';
+  hideSalesSection(); hideMJSection(); hideAccountsSection(); hideHRSection();
+  hideProspectiveSection(); hideUniqueAddedMonthSection();
+  if (typeof hideAnalysisSection === 'function') hideAnalysisSection();
+
+  var backBtn = document.querySelector('#salesExecSection .rbtn');
+  if (backBtn) {
+    if (RESTRICT_RSM_NAME) {
+      backBtn.textContent = '\u2190 Back to My Team';
+      backBtn.onclick = function() { showRestrictedRsmSummary(RS); };
+      backBtn.style.display = '';
+    } else {
+      backBtn.style.display = 'none';
+    }
+  }
+
+  if (RESTRICT_EXEC_EMAIL) {
+    var match = SALES_EXECUTIVES.find(function(ex) {
+      return ex && ex.email && ex.email.toLowerCase() === RESTRICT_EXEC_EMAIL.toLowerCase();
+    });
+    if (match) {
+      openSalesExecutiveSelection(match.email);
+    } else {
+      document.getElementById('salesExecSection').style.display = 'none';
+      document.getElementById('restricted-rsm-section').innerHTML =
+        '<div class="panel" style="text-align:center;padding:40px 20px;color:var(--tf);font-size:13px;">This link does not match any current Sales Executive. Please check the link or ask for an updated one.</div>';
+      document.getElementById('restricted-rsm-section').style.display = 'block';
+    }
+    return;
+  }
+
+  if (RESTRICT_RSM_NAME) {
+    showRestrictedRsmSummary(RS);
+  }
+}
+
+/* Renders the RSM's own "My Summary" panel (Target/Sale/
+   Achievement/Pending, from the same `rsms` data the full
+   dashboard already uses) and populates the restricted executive
+   dropdown with ONLY this RSM's own team - safe to call repeatedly
+   (re-fetches numbers fresh each time, but only builds the
+   dropdown's option list once). */
+function showRestrictedRsmSummary(RS) {
+  document.getElementById('salesExecSection').style.display = 'none';
+  var sec = document.getElementById('restricted-rsm-section');
+  sec.style.display = 'block';
+
+  document.getElementById('restrictedRsmTitle').textContent = RESTRICT_RSM_NAME + ' \u2014 My Summary';
+
+  var rsmData = (RS || []).find(function(r) { return r.name === RESTRICT_RSM_NAME; });
+  var kpisEl = document.getElementById('restrictedRsmKpis');
+  if (kpisEl) {
+    if (rsmData) {
+      var target = Number(rsmData.target) || 0;
+      var sale   = Number(rsmData.sale) || 0;
+      var ach    = target > 0 ? (sale / target * 100) : 0;
+      var pending = Math.max(target - sale, 0);
+      kpisEl.innerHTML =
+        '<div class="kpi"><div class="kpi-l">Target</div><div class="kpi-v">' + fmtRupee(target) + '</div></div>' +
+        '<div class="kpi"><div class="kpi-l">Sale</div><div class="kpi-v">' + fmtRupee(sale) + '</div></div>' +
+        '<div class="kpi"><div class="kpi-l">Achievement</div><div class="kpi-v">' + ach.toFixed(1) + '%</div></div>' +
+        '<div class="kpi"><div class="kpi-l">Pending</div><div class="kpi-v">' + fmtRupee(pending) + '</div></div>';
+    } else {
+      kpisEl.innerHTML = '<div style="font-size:12px;color:var(--tf);grid-column:1/-1;">No summary data found for "' + RESTRICT_RSM_NAME + '".</div>';
+    }
+  }
+
+  var sel = document.getElementById('restrictedExecSelect');
+  if (sel && sel.options.length <= 1) {
+    var byEmail = {};
+    SALES_EXECUTIVES.forEach(function(ex) {
+      if (ex && ex.email && ex.rsm === RESTRICT_RSM_NAME) byEmail[ex.email.toLowerCase()] = ex;
+    });
+    Object.values(byEmail)
+      .sort(function(a, b) { return a.name.localeCompare(b.name); })
+      .forEach(function(ex) {
+        var opt = document.createElement('option');
+        opt.value = ex.email;
+        opt.textContent = ex.name;
+        sel.appendChild(opt);
+      });
+    sel.addEventListener('change', function() {
+      if (this.value) openSalesExecutiveSelection(this.value);
+    });
+  }
 }
 
 function doRefresh() {
