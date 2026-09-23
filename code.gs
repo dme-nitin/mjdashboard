@@ -6090,6 +6090,31 @@ function testSaleTrendProductNames() {
   });
 }
 
+/* ══════════════════════════════════════════════════
+   testSalesExecutiveMasterListLive()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy, no caching involved at
+   all — this calls loadSalesExecutivesFromMasterList() directly,
+   the exact same function doGet() calls at the start of every
+   request, so this ALWAYS reflects the sheet's current live
+   content, completely bypassing getDashboardData()'s 60-second
+   cache (which is a separate, unrelated cache that only affects
+   the MAIN dashboard payload, not this function).
+
+   Logs every executive currently loaded from Report!GM:GO —
+   Name, Email, RSM — plus the total count, so you can directly
+   compare it against what you pasted into the sheet.
+══════════════════════════════════════════════════ */
+function testSalesExecutiveMasterListLive() {
+  var list = loadSalesExecutivesFromMasterList();
+  Logger.log("Total Sales Executives loaded from Report!GM:GO: " + list.length);
+  Logger.log("=== FULL LIST ===");
+  list.forEach(function(ex, i) {
+    Logger.log((i + 1) + ". Name=[" + ex.name + "] Email=[" + ex.email + "] RSM=[" + ex.rsm + "]");
+  });
+}
+
 function testAnalysisGqHa() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
