@@ -926,8 +926,26 @@ function doGet(e) {
       .createTextOutput(cb + "(" + JSON.stringify(payload) + ");")
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
-  return HtmlService
-    .createHtmlOutputFromFile("Index")
+  /* Personalized access links (?restrictRsm=<name> / ?restrictExec=<email>
+     / ?restrictView=salesProspective) are read HERE, server-side, and
+     baked into the served HTML via template variables — NEVER rely on
+     client-side window.location.search for this. Apps Script web apps
+     render their content inside an iframe hosted on a
+     *.googleusercontent.com domain; that iframe's own location does
+     not reliably carry the outer script.google.com/.../exec URL's
+     query string, so client-side URL-parameter reading silently
+     fails. Reading e.parameter here (always correct) and injecting
+     the values directly into the page is the reliable way through. */
+  var restrictRsmParam  = e.parameter.restrictRsm  || "";
+  var restrictExecParam = e.parameter.restrictExec || "";
+  var restrictViewParam = e.parameter.restrictView || "";
+
+  var template = HtmlService.createTemplateFromFile("Index");
+  template.restrictRsm  = restrictRsmParam;
+  template.restrictExec = restrictExecParam;
+  template.restrictView = restrictViewParam;
+
+  return template.evaluate()
     .setTitle("Global Medicare — RSM Dashboard")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
