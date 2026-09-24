@@ -369,6 +369,16 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
 </style>
 </head>
 <body>
+<script>
+/* Injected SERVER-SIDE by doGet() (see Code.gs) from the request's
+   ?restrictRsm=/?restrictExec=/?restrictView= query parameters —
+   this is the reliable path; see the comment in doGet() for why
+   client-side window.location.search does not work for this. */
+window.__INJECTED_RESTRICT_RSM__  = "<?= restrictRsm ?>";
+window.__INJECTED_RESTRICT_EXEC__ = "<?= restrictExec ?>";
+window.__INJECTED_RESTRICT_VIEW__ = "<?= restrictView ?>";
+console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTED_RESTRICT_RSM__), '| restrictExec =', JSON.stringify(window.__INJECTED_RESTRICT_EXEC__), '| restrictView =', JSON.stringify(window.__INJECTED_RESTRICT_VIEW__));
+</script>
 <!-- ══════════════════════════════════════════════════
      BACKGROUND IMAGE SLIDER
      ⚠️ REPLACE THE 3 background-image URLs below with your own
@@ -474,11 +484,47 @@ footer{margin-top:8px;padding-top:14px;border-top:1px solid var(--line);font-siz
 </div>
 
 <div id="restricted-rsm-section" style="display:none;">
-  <div class="panel">
-    <div class="sec-h" id="restrictedRsmTitle" style="margin:0;">My Summary</div>
-    <div class="sec-sub" style="margin:4px 0 0;">Personalized view — this link shows only your own numbers and your own team</div>
+  <div class="panel" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div class="sec-h" id="restrictedRsmTitle" style="margin:0;">My Summary</div>
+      <div class="sec-sub" style="margin:4px 0 0;">Personalized view — this link shows only your own numbers and your own team</div>
+    </div>
   </div>
-  <section class="kpis" id="restrictedRsmKpis" style="grid-template-columns:repeat(4,1fr);margin-top:16px;"></section>
+
+  <section class="scorecards" id="restrictedSc" style="margin-top:16px;"></section>
+
+  <div class="panel">
+    <div class="ph">
+      <div class="sec-h">Pipeline by Stage</div>
+    </div>
+    <div id="restrictedStBlocks"></div>
+    <div id="restrictedFChart"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">
+      <div class="sec-h" id="restrictedDemoTrendTitle">Last 6 Months Demo Trend</div>
+    </div>
+    <div id="restrictedDemoTrendTbl"></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="ph">
+      <div class="sec-h" style="margin:0;">My Sales Executives — Unique Customers Trend</div>
+    </div>
+    <div class="sec-sub" style="margin:-10px 0 14px;">Last 6 Months (Report!DD:DG)</div>
+    <div id="restrictedSalesExecTrendTbl" style="overflow-x:auto;">
+      <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">
+      <div class="sec-h" id="restrictedRsmForecastTitle">Total Expected Sale (3 Months)</div>
+    </div>
+    <div id="restrictedRsmForecastTbl"></div>
+  </div>
+
   <div class="panel" style="margin-top:16px;">
     <div class="sec-h" style="margin-bottom:12px;">My Sales Executives</div>
     <select id="restrictedExecSelect" style="width:100%;max-width:360px;padding:9px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--ink3);color:var(--ts);font-family:'Inter',sans-serif;font-weight:500;font-size:13px;cursor:pointer;">
@@ -1799,12 +1845,15 @@ function buildFilterPills() {
   }
 }
 
-function buildScorecards(RS, LD) {
+function buildScorecards(RS, LD, targetId) {
+  targetId = targetId || 'sc';
   const NOW  = new Date();
   const fyE  = (NOW - T0) / (TF - T0) * 100;
   const fyEp = Math.min(fyE / PS * 100, 100);
 
-  document.getElementById('sc').innerHTML = RS.map((r, i) => {
+  document.getElementById(targetId).innerHTML = RS.map((r, i) => {
+    const colorIdx = RSM_ORDER.indexOf(r.name);
+    const rc = RC[colorIdx >= 0 ? colorIdx : i];
     const leadsToShow = LD[r.name] || [];
     const isSelected  = (activeRSM === 'All' || activeRSM === r.name);
     const cardCls     = 'card' +
@@ -1822,11 +1871,11 @@ function buildScorecards(RS, LD) {
       '<div class="' + cardCls + '"' +
         ' onclick="setFilter(\'' + (activeRSM === r.name ? 'All' : r.name) + '\')"' +
         ' title="' + (activeRSM === r.name ? 'Click to clear filter' : 'Click to filter: ' + r.name) + '">' +
-        '<div class="card-rsm" style="color:' + RC[i] + '">' + r.name + '</div>' +
-        '<div class="ach-pct" style="color:' + RC[i] + '">' + (Number(r.achievement)||0).toFixed(2) +
+        '<div class="card-rsm" style="color:' + rc + '">' + r.name + '</div>' +
+        '<div class="ach-pct" style="color:' + rc + '">' + (Number(r.achievement)||0).toFixed(2) +
           '<sup>% of target</sup></div>' +
         '<div class="gtrack">' +
-          '<div class="gfill" style="width:' + gW + '%;background:' + RC[i] + '"></div>' +
+          '<div class="gfill" style="width:' + gW + '%;background:' + rc + '"></div>' +
           '<div class="gmark" style="left:' + fyEp + '%"></div>' +
         '</div>' +
         '<div class="figs">' +
@@ -3586,8 +3635,8 @@ function fetchSalesExecutiveUniqueCustomersTrend() {
   }
 }
 
-function renderSalesExecutiveUniqueCustomersTrend(data) {
-  const el = document.getElementById('salesExecUniqueCustomersTrendTbl');
+function renderSalesExecutiveUniqueCustomersTrend(data, targetId) {
+  const el = document.getElementById(targetId || 'salesExecUniqueCustomersTrendTbl');
   if (!el) return;
 
   const months = (data && Array.isArray(data.months)) ? data.months : [];
@@ -6451,7 +6500,16 @@ const DEPLOYED_URL = "https://script.google.com/macros/s/AKfycbx1eh9omJXRAr73b_O
 
 /* ▼▼ PASTE YOUR QUOTATION PROJECT'S DEPLOYED /exec URL HERE ▼▼
    This is a SEPARATE Google Apps Script project (its own Sheet +
-   Code.gs). Leave as "" to keep showing the placeholder message. */
+   Code.gs). Steps to get this URL:
+     1. Open that project's Apps Script editor.
+     2. Add a new HTML file there and paste in the Quotation
+        Form's HTML (the one currently only on your computer).
+     3. Deploy → New deployment → Web app → set access as needed
+        → Deploy. Copy the resulting /exec URL.
+     4. Paste it below (keep the quotes) and redeploy THIS
+        dashboard. The "Quotation Form" button will then load it
+        automatically. Leave as "" to keep showing the
+        placeholder message instead. */
 const QUOTATION_APP_URL = "https://dme-nitin.github.io/GlobalMedicareQuotation/";
 
 const AMC_CMC_URL = "https://dme-nitin.github.io/amc-cmc/";
@@ -6585,7 +6643,381 @@ function applyLiveData(data, rs) {
   setBadge(data.fromCache ? 'cached' : 'live');
   const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   if (rs) { rs.textContent = (data.fromCache ? '⚡ Cached ' : '✓ Live ') + ts; rs.className = 'rst ok'; }
+  applyRestrictedAccessModeIfNeeded(cR); /* personalized ?restrictExec=/?restrictRsm= links */
   return true;
+}
+
+/* ══════════════════════════════════════════════════
+   PERSONALIZED ACCESS LINKS
+   ----------------------------------------------------------------
+   Lets the dashboard be shared with RSMs and Sales Executives
+   WITHOUT giving them the full company-wide report.
+
+     ?restrictExec=<email>   -> shows ONLY that one Sales
+                                Executive's own report, no
+                                navigation to anything else.
+
+     ?restrictRsm=<RSM name> -> shows a small "My Summary" panel
+                                with that RSM's own Target/Sale/
+                                Achievement/Pending numbers, plus a
+                                dropdown restricted to ONLY that
+                                RSM's own team.
+
+   PRIVACY-BY-OBSCURITY, not a secure login: no password or
+   Google-account check. Share each link only with its intended
+   person. */
+const RESTRICT_EXEC_EMAIL = (window.__INJECTED_RESTRICT_EXEC__ || '').trim();
+const RESTRICT_RSM_NAME   = (window.__INJECTED_RESTRICT_RSM__  || '').trim();
+const RESTRICT_VIEW       = (window.__INJECTED_RESTRICT_VIEW__ || '').trim();
+const IS_RESTRICTED_LINK  = !!(RESTRICT_EXEC_EMAIL || RESTRICT_RSM_NAME || RESTRICT_VIEW);
+
+function applyRestrictedAccessModeIfNeeded(RS) {
+  if (!IS_RESTRICTED_LINK) return;
+
+  var header = document.querySelector('header.hero');
+  if (header) header.style.display = 'none';
+  var navRow = document.querySelector('.nav-btn-row');
+  if (navRow) navRow.style.display = 'none';
+
+  document.getElementById('mainView').style.display = 'none';
+  hideSalesSection(); hideMJSection(); hideAccountsSection(); hideHRSection();
+  hideProspectiveSection(); hideUniqueAddedMonthSection();
+  if (typeof hideAnalysisSection === 'function') hideAnalysisSection();
+
+  var backBtn = document.querySelector('#salesExecSection .rbtn');
+  if (backBtn) {
+    if (RESTRICT_RSM_NAME) {
+      backBtn.textContent = '\u2190 Back to My Team';
+      backBtn.onclick = function() { showRestrictedRsmSummary(RS); };
+      backBtn.style.display = '';
+    } else if (RESTRICT_VIEW === 'salesProspective') {
+      backBtn.textContent = '\u2190 Back';
+      backBtn.onclick = function() { showRestrictedSalesProspectiveView(); };
+      backBtn.style.display = '';
+    } else {
+      backBtn.style.display = 'none';
+    }
+  }
+
+  if (RESTRICT_EXEC_EMAIL) {
+    var match = SALES_EXECUTIVES.find(function(ex) {
+      return ex && ex.email && ex.email.toLowerCase() === RESTRICT_EXEC_EMAIL.toLowerCase();
+    });
+    if (match) {
+      openSalesExecutiveSelection(match.email);
+    } else {
+      document.getElementById('salesExecSection').style.display = 'none';
+      document.getElementById('restricted-rsm-section').innerHTML =
+        '<div class="panel" style="text-align:center;padding:40px 20px;color:var(--tf);font-size:13px;">This link does not match any current Sales Executive. Please check the link or ask for an updated one.</div>';
+      document.getElementById('restricted-rsm-section').style.display = 'block';
+    }
+    return;
+  }
+
+  if (RESTRICT_RSM_NAME) {
+    showRestrictedRsmSummary(RS);
+    return;
+  }
+
+  if (RESTRICT_VIEW === 'salesProspective') {
+    showRestrictedSalesProspectiveView();
+  }
+}
+
+/* Personalized link mode: ?restrictView=salesProspective — shows
+   the FULL, unfiltered "Sales" section (every RSM's own pipeline/
+   forecast/demo-trend/unique-customers widgets, AND the Sales
+   Executive dropdown with every executive's individual data still
+   reachable) together with the FULL "Prospective Customers"
+   section, stacked one after another. Nothing else (MJ, Accounts,
+   HR, Analysis, the main scorecards view) is reachable from this
+   link. Both sections' own content is rendered exactly as it is on
+   the normal dashboard — nothing is re-filtered here, only which
+   sections are visible at all is restricted. */
+function showRestrictedSalesProspectiveView() {
+  document.getElementById('salesExecSection').style.display = 'none';
+  document.getElementById('restricted-rsm-section').style.display = 'none';
+
+  var salesSec = document.getElementById('sales-section');
+  var prospSec = document.getElementById('prospective-section');
+  if (salesSec) salesSec.style.display = 'block';
+  if (prospSec) prospSec.style.display = 'block';
+  salesSectionOpen = true;
+  prospectiveSectionOpen = true;
+
+  if (!prospectiveListLoaded) fetchProspectiveCustomersList();
+}
+
+function showRestrictedRsmSummary(RS) {
+  document.getElementById('salesExecSection').style.display = 'none';
+  var sec = document.getElementById('restricted-rsm-section');
+  sec.style.display = 'block';
+
+  document.getElementById('restrictedRsmTitle').textContent = RESTRICT_RSM_NAME + ' \u2014 My Summary';
+
+  var rsmData = (RS || []).find(function(r) { return r.name === RESTRICT_RSM_NAME; });
+
+  if (!rsmData) {
+    document.getElementById('restrictedSc').innerHTML =
+      '<div style="font-size:12px;color:var(--tf);grid-column:1/-1;">No summary data found for "' + RESTRICT_RSM_NAME + '".</div>';
+    return;
+  }
+
+  /* Full card — Target, Achieved, Expected Sale This Month, Pending,
+     HVC/Non-HVC leads this month, pipeline mix, Demos (wk/mo),
+     Unique Cust (wk/mo), Total HVC/Non-HVC/YTD pipeline — reuses
+     the EXACT same function/markup as the main dashboard's
+     scorecards, just given a one-element array so only this RSM
+     renders. */
+  buildScorecards([rsmData], cL, 'restrictedSc');
+
+  /* Pipeline by Stage — same per-RSM block markup as the main
+     dashboard's stBlocks/fChart, scaled to just this RSM's own
+     numbers (maxC/maxT computed from this one RSM instead of all
+     five, so the bars still fill meaningfully). */
+  var stTot  = Object.values(rsmData.funnel).reduce(function(a,b){ return a+b; }, 0);
+  var maxC   = Math.max.apply(null, Object.values(rsmData.funnel).concat([1]));
+  var colorIdx = RSM_ORDER.indexOf(rsmData.name);
+  var rc = RC[colorIdx >= 0 ? colorIdx : 0];
+
+  document.getElementById('restrictedStBlocks').innerHTML =
+    '<div class="stage-block">' +
+      '<div class="sbh">' +
+        '<span class="sbh-dot" style="background:' + rc + '"></span>' +
+        '<span class="sbh-name" style="color:' + rc + '">' + rsmData.name + '</span>' +
+        '<span class="sbh-tot">' + stTot + ' total</span>' +
+      '</div>' +
+      STAGES.map(function(s) {
+        var c = rsmData.funnel[s.key] || 0;
+        if (c === 0) return '';
+        return '<div class="s-row">' +
+          '<div class="s-lbl">' + s.label + '</div>' +
+          '<div class="s-track"><div class="s-fill" style="width:' + (c/maxC*100) + '%;background:' + s.color + '"></div></div>' +
+          '<div class="s-cnt">' + c + '</div></div>';
+      }).join('') +
+    '</div>';
+
+  if (stTot > 0) {
+    var fSegs = STAGES.map(function(s) {
+      var p = rsmData.funnel[s.key] / stTot * 100;
+      if (p === 0) return '';
+      return '<div style="width:' + p + '%;background:' + s.color + '"></div>';
+    }).join('');
+    document.getElementById('restrictedFChart').innerHTML =
+      '<div class="fr">' +
+        '<div class="fn2">' + rsmData.name + '</div>' +
+        '<div class="fb" style="width:100%">' + fSegs + '</div>' +
+        '<div class="ftot">' + stTot + '</div>' +
+      '</div>';
+  } else {
+    document.getElementById('restrictedFChart').innerHTML = '';
+  }
+
+  /* Last 6 Months Demo Trend — same rolling-6-month window logic
+     as the main dashboard's "RSM Wise Last 6 Months Demo Trend",
+     just for this one RSM's row instead of all five. */
+  renderRestrictedDemoTrend(rsmData.name);
+
+  /* Total Expected Sale (3 Months) — same 3-month window logic as
+     the main dashboard's RSM forecast, for just this RSM. */
+  renderRestrictedRsmForecast(rsmData.name);
+
+  /* My Sales Executives — Unique Customers Trend, and the "select
+     an executive" dropdown — both filtered to ONLY this RSM's
+     team. The trend re-fetches live data every time (fresh, not
+     cached from the main dashboard's own copy) and filters the
+     result to this RSM's people before rendering with the SAME
+     table markup used on the main dashboard. */
+  fetchRestrictedSalesExecTrend(RESTRICT_RSM_NAME);
+
+  var sel = document.getElementById('restrictedExecSelect');
+  if (sel && sel.options.length <= 1) {
+    var byEmail = {};
+    SALES_EXECUTIVES.forEach(function(ex) {
+      if (ex && ex.email && ex.rsm === RESTRICT_RSM_NAME) byEmail[ex.email.toLowerCase()] = ex;
+    });
+    Object.values(byEmail)
+      .sort(function(a, b) { return a.name.localeCompare(b.name); })
+      .forEach(function(ex) {
+        var opt = document.createElement('option');
+        opt.value = ex.email;
+        opt.textContent = ex.name;
+        sel.appendChild(opt);
+      });
+    sel.addEventListener('change', function() {
+      if (this.value) openSalesExecutiveSelection(this.value);
+    });
+  }
+}
+
+/* Single-RSM version of "RSM Wise Last 6 Months Demo Trend" — same
+   rolling-window calculation as renderDemoTrend(), reading the
+   SAME already-fetched cDemoTrend global, just rendering one row
+   into the restricted view's own container instead of looping over
+   every RSM. */
+function renderRestrictedDemoTrend(rsmName) {
+  var el = document.getElementById('restrictedDemoTrendTbl');
+  if (!el) return;
+
+  var now     = new Date();
+  var curYear = now.getFullYear();
+  var curMo   = now.getMonth();
+
+  function isoKey(moOffset) {
+    var d = new Date(curYear, curMo + moOffset, 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+  var keys   = [-5,-4,-3,-2,-1,0].map(isoKey);
+  var labels = [-5,-4,-3,-2,-1,0].map(function(off) {
+    return MONTH_NAMES_FULL[((curMo + off) % 12 + 12) % 12];
+  });
+
+  var data = (cDemoTrend && cDemoTrend[rsmName]) ||
+    (cDemoTrend && Object.keys(cDemoTrend).find(function(k) { return k.toLowerCase() === rsmName.toLowerCase(); }) &&
+      cDemoTrend[Object.keys(cDemoTrend).find(function(k) { return k.toLowerCase() === rsmName.toLowerCase(); })]) || {};
+
+  var counts = keys.map(function(k) { return (data && data[k]) || 0; });
+  var total  = counts.reduce(function(a,b){ return a+b; }, 0);
+  var maxC   = Math.max.apply(null, counts.concat([1]));
+
+  var colorIdx = RSM_ORDER.indexOf(rsmName);
+  var rc = RC[colorIdx >= 0 ? colorIdx : 0];
+
+  el.innerHTML =
+    '<table class="compact-table" style="min-width:520px;">' +
+      '<thead><tr><th style="text-align:left;">' + rsmName + '</th>' +
+        labels.map(function(l) { return '<th style="text-align:center;min-width:72px;">' + l + '</th>'; }).join('') +
+        '<th style="text-align:center;min-width:60px;">Total</th>' +
+      '</tr></thead>' +
+      '<tbody><tr>' +
+        '<td style="font-weight:600;color:' + rc + ';">' + rsmName + '</td>' +
+        counts.map(function(c) { return '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;">' + c + '</td>'; }).join('') +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + total + '</td>' +
+      '</tr></tbody>' +
+    '</table>';
+}
+
+/* Single-RSM version of "RSM Wise Total Expected Sale" — same
+   3-month matching logic as renderRsmForecast(), reading the SAME
+   already-fetched cRsmMonthPipeline global for just this RSM. */
+function renderRestrictedRsmForecast(rsmName) {
+  var el = document.getElementById('restrictedRsmForecastTbl');
+  if (!el) return;
+
+  var now   = new Date();
+  var curMo = now.getMonth();
+  var lbl0 = MONTH_NAMES_FULL[((curMo)   % 12 + 12) % 12];
+  var lbl1 = MONTH_NAMES_FULL[((curMo+1) % 12 + 12) % 12];
+  var lbl2 = MONTH_NAMES_FULL[((curMo+2) % 12 + 12) % 12];
+
+  var titleEl = document.getElementById('restrictedRsmForecastTitle');
+  if (titleEl) titleEl.textContent = 'Total Expected Sale \u2014 ' + lbl0 + ' / ' + lbl1 + ' / ' + lbl2;
+
+  var monthLookup = {};
+  [0, 1, 2].forEach(function(off) {
+    var moIdx = ((curMo + off) % 12 + 12) % 12;
+    var full  = MONTH_NAMES_FULL[moIdx];
+    var short = MONTH_NAMES_SHORT[moIdx];
+    var d     = new Date(now.getFullYear(), curMo + off, 1);
+    var iso   = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    [full, full.toLowerCase(), full.toUpperCase(), short, short.toLowerCase(), short.toUpperCase(), iso]
+      .forEach(function(v) { if (v) monthLookup[v] = off; });
+  });
+  function matchMonth(key) {
+    var k = String(key || '').trim();
+    if (monthLookup[k] !== undefined) return monthLookup[k];
+    var kl = k.toLowerCase();
+    if (monthLookup[kl] !== undefined) return monthLookup[kl];
+    if (k.length >= 3) {
+      var pre = kl.slice(0,3);
+      for (var v of Object.keys(monthLookup)) {
+        if (v.toLowerCase().slice(0,3) === pre) return monthLookup[v];
+      }
+    }
+    return -1;
+  }
+
+  var moMap = (cRsmMonthPipeline && cRsmMonthPipeline[rsmName]) || {};
+  var v0 = 0, v1 = 0, v2 = 0;
+  Object.keys(moMap).forEach(function(key) {
+    var idx = matchMonth(key);
+    if (idx === 0) v0 += moMap[key] || 0;
+    else if (idx === 1) v1 += moMap[key] || 0;
+    else if (idx === 2) v2 += moMap[key] || 0;
+  });
+  var total = v0 + v1 + v2;
+
+  el.innerHTML =
+    '<table class="compact-table" style="min-width:420px;">' +
+      '<thead><tr><th style="text-align:left;">RSM</th>' +
+        '<th style="text-align:center;">' + lbl0 + '</th>' +
+        '<th style="text-align:center;">' + lbl1 + '</th>' +
+        '<th style="text-align:center;">' + lbl2 + '</th>' +
+        '<th style="text-align:center;">Total</th>' +
+      '</tr></thead>' +
+      '<tbody><tr>' +
+        '<td style="font-weight:600;">' + rsmName + '</td>' +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;">' + fi(v0) + '</td>' +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;">' + fi(v1) + '</td>' +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;">' + fi(v2) + '</td>' +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fi(total) + '</td>' +
+      '</tr></tbody>' +
+    '</table>';
+}
+
+/* Fetches the SAME live data as the main dashboard's "Sales
+   Executive Wise Unique Customers Trend" panel, filters it down to
+   ONLY this RSM's own team (matched by name against
+   SALES_EXECUTIVES), and renders it with the SAME table markup
+   (renderSalesExecutiveUniqueCustomersTrend), targeting the
+   restricted view's own container. */
+function fetchRestrictedSalesExecTrend(rsmName) {
+  var el = document.getElementById('restrictedSalesExecTrendTbl');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading\u2026</div>';
+
+  function handleData(data) {
+    var teamNames = {};
+    SALES_EXECUTIVES.forEach(function(ex) {
+      if (ex && ex.name && ex.rsm === rsmName) teamNames[ex.name.toLowerCase()] = true;
+    });
+    var filtered = {
+      months: (data && data.months) || [],
+      executives: ((data && data.executives) || []).filter(function(ex) {
+        return ex && ex.name && teamNames[ex.name.toLowerCase()];
+      })
+    };
+    renderSalesExecutiveUniqueCustomersTrend(filtered, 'restrictedSalesExecTrendTbl');
+  }
+
+  if (IS_GAS) {
+    google.script.run
+      .withSuccessHandler(handleData)
+      .withFailureHandler(function(err) {
+        console.error('[GM] getSalesExecutiveUniqueCustomersTrend (restricted) error:', err);
+        if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Could not load: ' + (err.message || err) + '</div>';
+      })
+      .getSalesExecutiveUniqueCustomersTrend();
+  } else {
+    var old = document.getElementById('__gm_rsect_j');
+    if (old) old.remove();
+    var cb = '__gmrsectcb' + Date.now();
+    window[cb] = function(data) { cleanup(); handleData(data); };
+    var timer = setTimeout(function() {
+      cleanup();
+      if (el) el.innerHTML = '<div style="font-size:11px;color:var(--coral);padding:8px 0;">Timeout loading data.</div>';
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      var s = document.getElementById('__gm_rsect_j');
+      if (s) s.remove();
+      delete window[cb];
+    }
+    var s = document.createElement('script');
+    s.id = '__gm_rsect_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=salesExecUniqueCustomersTrend&_=' + Date.now();
+    s.onerror = function() { cleanup(); console.error('[GM] getSalesExecutiveUniqueCustomersTrend (restricted) network error'); };
+    document.head.appendChild(s);
+  }
 }
 
 function doRefresh() {
