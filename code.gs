@@ -2998,6 +2998,35 @@ function getPoInHand() {
   return { total: Math.round(total), rows: rows };
 }
 
+/* Classifies a DY cell's background for the Inventory Item Wise
+   hierarchy: "yellow" = company header, "grey" = an item whose
+   immediately-following white rows are its location-wise
+   breakdown (until the next non-white row), "other" = any other
+   distinct highlight color, used as an explicit STOP signal for an
+   in-progress grey breakup (per the dynamic-future-proofing
+   requirement — a differently-colored row always ends the current
+   breakup, whatever color it is), "white" = a normal row. */
+function classifyInventoryRowColor(hex) {
+  if (!hex) return "white";
+  hex = String(hex).trim().toLowerCase();
+  if (hex === "" || hex === "#ffffff" || hex === "#fff") return "white";
+  if (hex.charAt(0) !== "#" || hex.length < 7) return "white";
+  var r = parseInt(hex.substring(1, 3), 16);
+  var g = parseInt(hex.substring(3, 5), 16);
+  var b = parseInt(hex.substring(5, 7), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return "white";
+  var maxc = Math.max(r, g, b), minc = Math.min(r, g, b);
+  var isNeutral = (maxc - minc) < 15; /* low saturation = grey/neutral, not a hued color */
+  if (isNeutral) {
+    if (maxc > 245) return "white"; /* near-pure white — not a highlight at all */
+    return "grey";
+  }
+  /* Yellow-ish: red AND green both high, blue clearly lower — the
+     existing company-header highlight already used in this sheet. */
+  if (r > 170 && g > 150 && (r - b) > 60 && (g - b) > 40) return "yellow";
+  return "other"; /* any other distinctly-hued highlight */
+}
+
 function getInventoryItemWise() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var rep = ss.getSheetByName(REPORT_TAB);
@@ -3015,10 +3044,56 @@ function getInventoryItemWise() {
   var headerOwnValue  = {}; /* company -> {qty, amount} from its OWN header row, if non-zero — only used as a fallback self-item, see below */
   var currentCompany  = null;
 
+  /* Location-breakup state (dynamic, color-driven — see
+     classifyInventoryRowColor() above):
+       lastPushedItem   = the most recently pushed plain item under
+                          the current company — when a GREY row
+                          appears right after it, THIS item
+                          retroactively becomes the breakup parent
+                          (a "- TOTAL"-style row followed by its
+                          location rows, confirmed against the real
+                          sheet layout), rather than the grey row
+                          itself becoming a new item.
+       breakupParentItem = once a breakup has started, every
+                          following row (grey or white) is nested
+                          under this item's `.locations`, until a
+                          YELLOW (new company) or any OTHER distinct
+                          color ends it. */
+  var lastPushedItem    = null;
+  var breakupParentItem = null;
+
+  /* Registry of every plain item pushed so far, ACROSS ALL
+     companies, keyed by its lowercased name — lets a later grey
+     breakup's trigger row (e.g. "...TOTAL", which may physically
+     sit under a totally different, unrelated company further down
+     the sheet) be recognized as belonging to an item that already
+     exists elsewhere (e.g. "Antenna" under Medtronic), purely by
+     name containment — no company/item name is ever hardcoded, any
+     future item pair with the same "short name is a substring of
+     the long name" relationship is picked up automatically. */
+  var itemsByName = {}; /* lowercased short name -> { company, obj } */
+
+  function registerItem(company, obj) {
+    var key = String(obj.item || "").trim().toLowerCase();
+    if (key && !itemsByName[key]) itemsByName[key] = { company: company, obj: obj };
+  }
+  function findExistingMatch(candidateName) {
+    var lower = candidateName.toLowerCase();
+    var bestKey = null;
+    Object.keys(itemsByName).forEach(function(key) {
+      if (key.length < 3) return; /* avoid trivial/noisy short-substring matches */
+      if (lower === key) return;  /* not itself */
+      if (lower.indexOf(key) !== -1) {
+        if (!bestKey || key.length > bestKey.length) bestKey = key; /* prefer the LONGEST matching existing name */
+      }
+    });
+    return bestKey ? itemsByName[bestKey] : null;
+  }
+
   for (var i = 0; i < values.length; i++) {
     var name = String(values[i][0] || "").trim();
-    if (!name) continue; /* blank spacer row — skip, keep current company as-is */
-    if (/grand\s*total/i.test(name) || name.toLowerCase() === "total") continue; /* summary row, not a company */
+    if (!name) continue; /* blank spacer row — skip, keep current company/breakup state as-is */
+    if (/grand\s*total/i.test(name) || name.toLowerCase() === "total") continue; /* summary row, not a company/item */
 
     /* Skip non-inventory filler rows entirely — as both a company
        header AND as an item — e.g. "GOVT & OTHERS", "GOVT",
@@ -3031,12 +3106,12 @@ function getInventoryItemWise() {
     var qty = typeof qtyRaw === "number" ? qtyRaw : (parseFloat(String(qtyRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
     var amt = typeof amtRaw === "number" ? amtRaw : (parseFloat(String(amtRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
 
-    var bg = String(backgrounds[i][0] || "").toLowerCase();
-    /* Company header = any non-white/non-default highlight (yellow
-       in this sheet). Plain/unformatted cells come back as "#ffffff". */
-    var isCompanyHeader = bg !== "" && bg !== "#ffffff";
+    var rowColor = classifyInventoryRowColor(backgrounds[i][0]);
 
-    if (isCompanyHeader) {
+    if (rowColor === "yellow") {
+      /* New company header — always ends any in-progress breakup. */
+      breakupParentItem = null;
+      lastPushedItem = null;
       currentCompany = name;
       if (companyOrder.indexOf(currentCompany) === -1) {
         companyOrder.push(currentCompany);
@@ -3050,10 +3125,82 @@ function getInventoryItemWise() {
       if (qty !== 0 || amt !== 0) {
         headerOwnValue[currentCompany] = { qty: qty, amount: amt };
       }
+      continue;
+    }
+
+    if (!currentCompany) continue; /* row before any company header seen — skip */
+
+    if (rowColor === "grey") {
+      if (qty === 0 && amt === 0) continue; /* hide zero/zero rows, same as always */
+
+      if (breakupParentItem) {
+        /* A breakup is already open (e.g. a second grey row further
+           down the same block) — this grey row is just another
+           location under the SAME parent, not a new one. */
+        breakupParentItem.locations.push({ location: name, qty: qty, amount: amt });
+      } else if (lastPushedItem) {
+        /* The plain item row immediately before this grey row (e.g.
+           "...- TOTAL") is the natural breakup parent — UNLESS its
+           name shows it's really a re-statement of an item that
+           already exists elsewhere in the sheet (e.g. "Antenna"
+           under Medtronic), in which case the breakup is merged
+           into THAT existing item instead, and this duplicate/
+           misplaced row is dropped rather than kept as its own
+           separate product. */
+        var existingMatch = findExistingMatch(lastPushedItem.item);
+        if (existingMatch) {
+          var arr = data[lastPushedItem.__company || currentCompany];
+          var idx = arr ? arr.indexOf(lastPushedItem) : -1;
+          if (idx !== -1) arr.splice(idx, 1); /* drop the duplicate/misplaced row */
+          if (!existingMatch.obj.locations) existingMatch.obj.locations = [];
+          existingMatch.obj.locations.push({ location: name, qty: qty, amount: amt });
+          breakupParentItem = existingMatch.obj;
+        } else {
+          lastPushedItem.locations = [{ location: name, qty: qty, amount: amt }];
+          breakupParentItem = lastPushedItem;
+        }
+      } else {
+        /* No preceding item to attach to (grey row is the very
+           first thing under this company) — falls back to being
+           its own item, still starting a breakup for whatever
+           follows. */
+        var greyItem = { item: name, qty: qty, amount: amt, locations: [] };
+        data[currentCompany].push(greyItem);
+        registerItem(currentCompany, greyItem);
+        breakupParentItem = greyItem;
+      }
+      continue;
+    }
+
+    if (rowColor === "other") {
+      /* Any OTHER distinct highlight color explicitly STOPS an
+         in-progress breakup (per the dynamic future-proofing
+         requirement) without itself becoming a location — it's
+         treated as a normal item row for whichever company is
+         current, same as a plain white row would be. */
+      breakupParentItem = null;
+      lastPushedItem = null;
+      if (qty === 0 && amt === 0) continue;
+      var otherItem = { item: name, qty: qty, amount: amt, __company: currentCompany };
+      data[currentCompany].push(otherItem);
+      registerItem(currentCompany, otherItem);
+      lastPushedItem = otherItem;
+      continue;
+    }
+
+    /* rowColor === "white" from here on */
+    if (qty === 0 && amt === 0) continue; /* hide zero/zero rows */
+
+    if (breakupParentItem) {
+      /* Still inside an active grey breakup — this row is a
+         location under the breakup's parent item, not a sibling
+         product. */
+      breakupParentItem.locations.push({ location: name, qty: qty, amount: amt });
     } else {
-      if (!currentCompany) continue;   /* item row before any company header seen — skip */
-      if (qty === 0 && amt === 0) continue; /* hide zero/zero rows */
-      data[currentCompany].push({ item: name, qty: qty, amount: amt });
+      var whiteItem = { item: name, qty: qty, amount: amt, __company: currentCompany };
+      data[currentCompany].push(whiteItem);
+      registerItem(currentCompany, whiteItem);
+      lastPushedItem = whiteItem;
     }
   }
 
@@ -3072,10 +3219,15 @@ function getInventoryItemWise() {
         amount : headerOwnValue[company].amount
       });
     }
+    /* Strip the internal __company bookkeeping field (used only to
+       find/remove a merged-away duplicate row) — not meant for the
+       frontend. */
+    data[company].forEach(function(it) { delete it.__company; });
   });
 
   return { companies: companyOrder, data: data };
 }
+
 
 /* ══════════════════════════════════════════════════
    getMonthlyCashflow()
@@ -6130,6 +6282,57 @@ function testSalesExecutiveMasterListLive() {
   Logger.log("=== FULL LIST ===");
   list.forEach(function(ex, i) {
     Logger.log((i + 1) + ". Name=[" + ex.name + "] Email=[" + ex.email + "] RSM=[" + ex.rsm + "]");
+  });
+}
+
+/* ══════════════════════════════════════════════════
+   testInventoryLocationBreakup()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Shows exactly how every row in Report!DY:EA was classified by
+   classifyInventoryRowColor() (yellow=company header, grey=item
+   with a location breakdown, other=stop-signal, white=normal),
+   plus the FINAL nested result getInventoryItemWise() produced —
+   so you can confirm Antenna's grey row and its locations were
+   detected correctly, and see the real hex color read from the
+   sheet for anything that looks wrong.
+══════════════════════════════════════════════════ */
+function testInventoryLocationBreakup() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var range = rep.getRange(2, 129, lastRow - 1, 3); /* DY=129, DY:EA */
+  var values = range.getValues();
+  var backgrounds = range.getBackgrounds();
+
+  Logger.log("=== ROW-BY-ROW CLASSIFICATION (first 60 non-blank rows) ===");
+  var shown = 0;
+  for (var i = 0; i < values.length && shown < 60; i++) {
+    var name = String(values[i][0] || "").trim();
+    if (!name) continue;
+    var hex = backgrounds[i][0];
+    var color = classifyInventoryRowColor(hex);
+    Logger.log("Row " + (i+2) + ": name=[" + name + "] hex=[" + hex + "] classified=" + color +
+               " qty=" + values[i][1] + " amount=" + values[i][2]);
+    shown++;
+  }
+
+  Logger.log("=== FINAL NESTED RESULT (companies with any item that has locations) ===");
+  var result = getInventoryItemWise();
+  result.companies.forEach(function(company) {
+    var items = result.data[company] || [];
+    items.forEach(function(it) {
+      if (it.locations && it.locations.length) {
+        Logger.log(company + " -> " + it.item + " (qty=" + it.qty + ", amount=" + it.amount + ") has " + it.locations.length + " location(s):");
+        it.locations.forEach(function(loc) {
+          Logger.log("    - " + loc.location + " | qty=" + loc.qty + " | amount=" + loc.amount);
+        });
+      }
+    });
   });
 }
 
