@@ -6132,12 +6132,52 @@ function renderInventoryItemWise(data, tblElId, totalElId, sidPrefix) {
     const totalAmount = items.reduce(function(s, it) { return s + (Number(it.amount) || 0); }, 0);
 
     const itemRows = items.length
-      ? items.map(function(it) {
-          return '<tr>' +
-            '<td style="font-weight:500;color:var(--ink);font-size:11px;text-align:center;">' + it.item + '</td>' +
-            '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;color:var(--ts);font-size:11px;">' + (it.qty || 0) + '</td>' +
-            '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);font-size:11px;">' + formatAmountShort(it.amount) + '</td>' +
-          '</tr>';
+      ? items.map(function(it, ii) {
+          const hasLocations = Array.isArray(it.locations) && it.locations.length > 0;
+          const itemSid = sid + '_i' + ii;
+
+          if (!hasLocations) {
+            return '<tr>' +
+              '<td style="font-weight:500;color:var(--ink);font-size:11px;text-align:center;">' + it.item + '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;color:var(--ts);font-size:11px;">' + (it.qty || 0) + '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);font-size:11px;">' + formatAmountShort(it.amount) + '</td>' +
+            '</tr>';
+          }
+
+          /* Item WITH a location-wise breakdown (e.g. Antenna under
+             Medtronic) — the row itself becomes click-to-expand,
+             showing each location's own Qty/Amount underneath,
+             exactly like the outer company row does for its items. */
+          const locRows = it.locations.map(function(loc) {
+            return '<tr>' +
+              '<td style="font-weight:400;color:var(--ts);font-size:10.5px;text-align:center;padding-left:18px;">' + loc.location + '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;color:var(--ts);font-size:10.5px;">' + (loc.qty || 0) + '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:600;color:var(--primary);font-size:10.5px;">' + formatAmountShort(loc.amount) + '</td>' +
+            '</tr>';
+          }).join('');
+
+          return '<tr class="prod-row" data-sid="' + itemSid + '" onclick="event.stopPropagation();toggleProdRow(\'' + itemSid + '\')" style="cursor:pointer;">' +
+              '<td style="font-weight:600;color:var(--ink);font-size:11px;text-align:center;">' +
+                '<span class="prod-chv" style="font-size:9px;">▶</span> ' + it.item +
+                '<span style="font-size:9px;color:var(--tf);margin-left:6px;font-family:IBM Plex Mono,monospace;">' + it.locations.length + ' location' + (it.locations.length !== 1 ? 's' : '') + '</span>' +
+              '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;color:var(--ts);font-size:11px;">' + (it.qty || 0) + '</td>' +
+              '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);font-size:11px;">' + formatAmountShort(it.amount) + '</td>' +
+            '</tr>' +
+            '<tr class="prod-detail" id="' + itemSid + '">' +
+              '<td colspan="3" style="padding:0;">' +
+                '<div class="prod-inner">' +
+                  '<table class="cust-tbl" style="width:100%">' +
+                    '<thead><tr>' +
+                      '<th style="width:50%;text-align:center;font-size:10px;">Location</th>' +
+                      '<th style="width:25%;text-align:center;font-size:10px;">Qty</th>' +
+                      '<th style="width:25%;text-align:center;font-size:10px;">Amount</th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + locRows + '</tbody>' +
+                  '</table>' +
+                '</div>' +
+              '</td>' +
+            '</tr>';
         }).join('')
       : '<tr><td colspan="3" style="color:var(--tf);font-style:italic;font-size:10px;padding:6px 0;text-align:center;">No items with stock/value for this company.</td></tr>';
 
