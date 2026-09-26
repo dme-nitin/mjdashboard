@@ -1468,7 +1468,8 @@ var STATE_ABBREVIATIONS = {
   "chattisgarh":"Chhattisgarh", "br":"Bihar", "as":"Assam",
   "mn":"Manipur", "ml":"Meghalaya", "mz":"Mizoram", "sk":"Sikkim",
   "tr":"Tripura", "ar":"Arunachal Pradesh", "ga":"Goa", "tg":"Telangana", "ts":"Telangana",
-  "dl":"Delhi", "ncr":"Delhi", "delhi ncr":"Delhi", "national capital region":"Delhi", "uk":"Uttarakhand", "ut":"Uttarakhand"
+  "dl":"Delhi", "ncr":"Delhi", "delhi ncr":"Delhi", "national capital region":"Delhi", "uk":"Uttarakhand", "ut":"Uttarakhand",
+  "uttrakhand":"Uttarakhand", "uttarkhand":"Uttarakhand"
 };
 
 /* Fixed reference city → state lookup (major Indian cities, PLUS
@@ -1745,31 +1746,66 @@ function getAnalysisData() {
     });
   } catch (e) { Logger.log("getAnalysisData GQ:HA ERROR: " + e.message); }
 
-  /* ── Graphs 3 & 4: Report!BR:BW (6 cols, BR = col 70) — SAME
-     range already used by getExecutiveData()/getProspectiveCustomersData()
-     elsewhere in this file:
-       BT (col 72, index 2) = Hospital Name (not used here)
-       BU (col 73, index 3) = City Name — the field these 2 graphs group by */
+  /* ── Graphs 3 & 4: Report!GQ:HA (11 cols, GQ = col 199) — SAME
+     range already used by Graphs 1 & 2 above:
+       GT (col 202, index 3) = State
+       GV (col 204, index 5) = Amount — the value SUMMED per state/city
+       GX (col 206, index 7) = City
+     Both graphs aggregate the AMOUNT (GV), not a row count. */
   var stateWiseProspectiveMap = {};
   var cityWiseProspectiveMap  = {};
   try {
-    var brData = rep.getRange(2, 70, lastRow - 1, 6).getValues();
-    brData.forEach(function(r) {
-      var city = String(r[3] || "").trim(); /* BU */
-      if (!city) return;
+    gqData.forEach(function(r) {
+      var stateRaw  = String(r[3] || "").trim();  /* GT */
+      var cityRaw   = String(r[7] || "").trim();  /* GX */
+      var amountRaw = r[5];                        /* GV */
+      var amount = typeof amountRaw === "number" ? amountRaw
+                   : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+      if (amount === 0) return;
 
-      var cityKey = city.toLowerCase();
-      if (!cityWiseProspectiveMap[cityKey]) cityWiseProspectiveMap[cityKey] = { label: city, value: 0 };
-      cityWiseProspectiveMap[cityKey].value += 1;
+      /* Resolve the city (GX) once — reused for BOTH graphs below. */
+      var cityLoc = cityRaw ? resolveIndianLocation(cityRaw) : null;
+      var isNcrCity = !!(cityLoc && cityLoc.state === "Delhi / NCR");
 
-      var loc = resolveIndianLocation(city);
-      if (loc.type !== "city" && loc.type !== "state") return; /* unresolved (e.g. Nepal) → skip entirely, no bucket at all */
-      var stateLabel = loc.state;
-      var stateKey = stateLabel.toLowerCase();
-      if (!stateWiseProspectiveMap[stateKey]) stateWiseProspectiveMap[stateKey] = { label: stateLabel, value: 0 };
-      stateWiseProspectiveMap[stateKey].value += 1;
+      if (cityRaw) {
+        /* Merge Noida, Gurugram/Gurgaon, Faridabad, Ghaziabad,
+           Greater Noida, and plain Delhi/NCR itself (all of which
+           resolveIndianLocation() already recognizes as the same
+           "Delhi / NCR" metro area) into a single "Delhi NCR"
+           bucket for City Wise Prospective, per explicit
+           requirement — every other city keeps its own raw name. */
+        var cityLabel = isNcrCity ? "Delhi NCR" : cityRaw;
+        var cityKey = cityLabel.toLowerCase();
+        if (!cityWiseProspectiveMap[cityKey]) cityWiseProspectiveMap[cityKey] = { label: cityLabel, value: 0 };
+        cityWiseProspectiveMap[cityKey].value += amount;
+      }
+
+      if (isNcrCity) {
+        /* GX (City) says this row is an NCR-satellite city (Noida,
+           Gurgaon, etc.) — count it under "Delhi NCR" for State
+           Wise too, OVERRIDING whatever GT literally says (e.g.
+           "Uttar Pradesh"/"Haryana" — geographically accurate, but
+           per explicit requirement these rows should agree with
+           the City Wise graph's NCR grouping rather than showing
+           their technical state). */
+        var ncrKey = "delhi ncr";
+        if (!stateWiseProspectiveMap[ncrKey]) stateWiseProspectiveMap[ncrKey] = { label: "Delhi NCR", value: 0 };
+        stateWiseProspectiveMap[ncrKey].value += amount;
+      } else if (stateRaw) {
+        var loc = resolveIndianLocation(stateRaw);
+        if (loc.type === "city" || loc.type === "state") {
+          /* Normalize "Delhi / NCR" (the shared wrapper's label) to
+             the same "Delhi NCR" label used by the GX-override path
+             above, so both routes into this bucket land in ONE
+             consistent entry instead of two near-duplicate ones. */
+          var stateLabel = loc.state === "Delhi / NCR" ? "Delhi NCR" : loc.state;
+          var stateKey = stateLabel.toLowerCase();
+          if (!stateWiseProspectiveMap[stateKey]) stateWiseProspectiveMap[stateKey] = { label: stateLabel, value: 0 };
+          stateWiseProspectiveMap[stateKey].value += amount;
+        }
+      }
     });
-  } catch (e) { Logger.log("getAnalysisData BR:BW ERROR: " + e.message); }
+  } catch (e) { Logger.log("getAnalysisData GQ:HA (Graphs 3&4) ERROR: " + e.message); }
 
   /* ── Graphs 5, 6 & 7: Report!EQ:EX (8 cols, EQ = col 147) — SAME
      range already used by getThisMonthSale()/getTotalSaleYtdRows()
@@ -1921,9 +1957,9 @@ function getAnalysisData() {
     topCustomersThisYear  : topNFromMap(topCustomersThisYearMap, 10),
     topCustomersThisYearTotal : Math.round(topCustomersThisYearFullTotal), /* same, for the full year window */
     stateWiseProspective  : topNFromMap(stateWiseProspectiveMap, 999), /* all states, not just top 10 (graph shows every state); unresolved entries like Nepal are skipped entirely, not shown */
-    stateWiseProspectiveTotal : sumMapField(stateWiseProspectiveMap, "value"), /* total prospective-customer count across every state */
+    stateWiseProspectiveTotal : sumMapField(stateWiseProspectiveMap, "value"), /* total AMOUNT (GV) across every state, not a count */
     cityWiseProspective   : topNFromMap(cityWiseProspectiveMap, 20),  /* top 20 cities only, by count */
-    cityWiseProspectiveTotal : sumMapField(cityWiseProspectiveMap, "value"), /* total count across EVERY city, not just the top 20 shown */
+    cityWiseProspectiveTotal : sumMapField(cityWiseProspectiveMap, "value"), /* total AMOUNT (GV) across EVERY city, not just the top 20 shown */
     stateWiseTopSaleCapex       : topNAmountQty(stateWiseTopSaleCapexMap, 10),
     stateWiseTopSaleCapexTotal       : sumMapField(stateWiseTopSaleCapexMap, "amount"),
     stateWiseTopSaleConsumables : topNAmountQty(stateWiseTopSaleConsumablesMap, 10),
@@ -5242,6 +5278,28 @@ function getDashboardData(forceRefresh) {
     });
   });
 
+  /* ── Active Leads (Prospective Customers) RSM-wise breakup —
+     Report!GQ:HA (11 cols, GQ = col 199). CONFIRMED separate from
+     the H1:N5 funnel data above (which still powers "Pipeline by
+     Stage" elsewhere, untouched): GY (col 207, index 8 in this
+     11-col read) = RSM Name — every row with a non-blank GY is one
+     prospective customer, counted against that RSM. */
+  var activeLeadsByRsm = {};
+  RSM_NAMES.forEach(function(n) { activeLeadsByRsm[n] = 0; });
+  var activeLeadsTotal = 0;
+  var gqHaLastRow = rep.getLastRow();
+  if (gqHaLastRow >= 2) {
+    var gqHaData = rep.getRange(2, 199, gqHaLastRow - 1, 11).getValues();
+    gqHaData.forEach(function(row) {
+      var rsmRaw = String(row[8] || "").trim(); /* GY */
+      if (!rsmRaw) return;
+      var rsmName = canonicalRsmName(rsmRaw);
+      if (activeLeadsByRsm[rsmName] === undefined) activeLeadsByRsm[rsmName] = 0;
+      activeLeadsByRsm[rsmName]++;
+      activeLeadsTotal++;
+    });
+  }
+
   /* ── 4. LEADS Report!AD2:AI ── */
   var leadsMap = {};
   RSM_NAMES.forEach(function(n) { leadsMap[n] = []; });
@@ -5669,6 +5727,8 @@ function getDashboardData(forceRefresh) {
     fromCache      : false,
     rsms           : RSM_NAMES.map(function(n) { return rsms[n]; }),
     leads          : leadsMap,
+    activeLeadsByRsm : activeLeadsByRsm, /* Active Leads (Prospective Customers) RSM-wise breakup — Report!GQ:HA (GY = RSM name) */
+    activeLeadsTotal : activeLeadsTotal, /* grand total across all RSMs, from the same GQ:HA range */
     products       : products,
     priceMap       : priceMap,
     prodCustMap    : prodCustMap,
@@ -6334,6 +6394,164 @@ function testInventoryLocationBreakup() {
       }
     });
   });
+}
+
+/* ══════════════════════════════════════════════════
+   testActiveLeadsGqHa()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Shows the RSM-wise Active Leads count from Report!GQ:HA (GY =
+   RSM name) and the grand total, so you can confirm it matches
+   the expected 471, plus every distinct raw GY value seen (in
+   case some don't match a known RSM name exactly).
+══════════════════════════════════════════════════ */
+function testActiveLeadsGqHa() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var data = rep.getRange(2, 199, lastRow - 1, 11).getValues(); /* GQ=199, 11 cols through HA=209 */
+
+  var byRsm = {};
+  var total = 0;
+  var unmatched = {};
+
+  data.forEach(function(row) {
+    var rsmRaw = String(row[8] || "").trim(); /* GY */
+    if (!rsmRaw) return;
+    var rsmName = canonicalRsmName(rsmRaw);
+    if (!byRsm[rsmName]) byRsm[rsmName] = 0;
+    byRsm[rsmName]++;
+    total++;
+    if (RSM_NAMES.indexOf(rsmName) === -1) {
+      unmatched[rsmRaw] = (unmatched[rsmRaw] || 0) + 1;
+    }
+  });
+
+  Logger.log("=== RSM-wise Active Leads count (from GQ:HA, GY column) ===");
+  Object.keys(byRsm).forEach(function(rsm) {
+    Logger.log(rsm + ": " + byRsm[rsm]);
+  });
+  Logger.log("=== GRAND TOTAL: " + total + " (expected 471) ===");
+
+  if (Object.keys(unmatched).length) {
+    Logger.log("=== Raw GY values that don't match a known RSM_NAMES entry ===");
+    Object.keys(unmatched).forEach(function(raw) {
+      Logger.log("'" + raw + "' -> " + unmatched[raw] + " row(s)");
+    });
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   testDelhiNcrGtGxMismatch()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   Shows every Report!GQ:HA row where GT (State) and GX (City)
+   DISAGREE about belonging to "Delhi / NCR" — e.g. GT says Delhi
+   but GX is blank/different, or GX says Noida but GT is blank/
+   different — along with each row's Amount (GV), so you can see
+   exactly which rows account for the ₹24.23 Cr vs ₹22.71 Cr gap
+   between the State Wise and City Wise Prospective graphs.
+══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════
+   testStateVsCityTotalGap()
+   Run DIRECTLY in the Apps Script editor: select this function
+   in the dropdown next to "Run", click Run, then View → Logs
+   (or Ctrl+Enter). No URL, no redeploy needed.
+
+   City Wise Prospective counts EVERY row with a non-blank GX
+   (City), even if the text doesn't resolve to any known place.
+   State Wise Prospective only counts a row if GT (State) resolves
+   to a recognized state or city — a blank or unrecognized GT is
+   silently excluded. This function shows every row that
+   contributes to the City Wise total but NOT the State Wise total
+   (blank/unrecognized GT with a non-blank GX and non-zero amount),
+   which explains the overall grand-total gap between the two
+   graphs.
+══════════════════════════════════════════════════ */
+function testStateVsCityTotalGap() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var data = rep.getRange(2, 199, lastRow - 1, 11).getValues(); /* GQ=199, 11 cols through HA=209 */
+
+  var gapRows = [];
+  var gapTotal = 0;
+  var stateTotal = 0, cityTotal = 0;
+
+  data.forEach(function(r, i) {
+    var stateRaw  = String(r[3] || "").trim(); /* GT */
+    var cityRaw   = String(r[7] || "").trim(); /* GX */
+    var amountRaw = r[5]; /* GV */
+    var amount = typeof amountRaw === "number" ? amountRaw : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) return;
+
+    if (cityRaw) cityTotal += amount;
+
+    var stateResolves = stateRaw && (function() {
+      var t = resolveIndianLocation(stateRaw).type;
+      return t === "state" || t === "city";
+    })();
+    if (stateResolves) stateTotal += amount;
+
+    if (cityRaw && !stateResolves) {
+      gapRows.push("Row " + (i+2) + ": GT=[" + stateRaw + "] GX=[" + cityRaw + "] amount=" + amount);
+      gapTotal += amount;
+    }
+  });
+
+  Logger.log("=== Rows counted in City Wise but NOT State Wise (blank/unrecognized GT) — " + gapRows.length + " rows, total=" + Math.round(gapTotal) + " ===");
+  gapRows.forEach(function(s) { Logger.log(s); });
+
+  Logger.log("=== State Wise total (all rows where GT resolves): " + Math.round(stateTotal) + " ===");
+  Logger.log("=== City Wise total (all rows with non-blank GX): " + Math.round(cityTotal) + " ===");
+}
+
+function testDelhiNcrGtGxMismatch() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var rep = ss.getSheetByName(REPORT_TAB);
+  if (!rep) { Logger.log("Sheet not found: " + REPORT_TAB); return; }
+
+  var lastRow = rep.getLastRow();
+  var data = rep.getRange(2, 199, lastRow - 1, 11).getValues(); /* GQ=199, 11 cols through HA=209 */
+
+  var gtOnlyRows = [];   /* GT = Delhi/NCR, GX is NOT */
+  var gxOnlyRows = [];   /* GX = Delhi/NCR, GT is NOT */
+  var gtOnlyTotal = 0, gxOnlyTotal = 0;
+
+  data.forEach(function(r, i) {
+    var stateRaw  = String(r[3] || "").trim(); /* GT */
+    var cityRaw   = String(r[7] || "").trim(); /* GX */
+    var amountRaw = r[5]; /* GV */
+    var amount = typeof amountRaw === "number" ? amountRaw : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    if (amount === 0) return;
+
+    var gtIsNcr = stateRaw && resolveIndianLocation(stateRaw).state === "Delhi / NCR";
+    var gxIsNcr = cityRaw && resolveIndianLocation(cityRaw).state === "Delhi / NCR";
+
+    if (gtIsNcr && !gxIsNcr) {
+      gtOnlyRows.push("Row " + (i+2) + ": GT=[" + stateRaw + "] GX=[" + cityRaw + "] amount=" + amount);
+      gtOnlyTotal += amount;
+    } else if (gxIsNcr && !gtIsNcr) {
+      gxOnlyRows.push("Row " + (i+2) + ": GT=[" + stateRaw + "] GX=[" + cityRaw + "] amount=" + amount);
+      gxOnlyTotal += amount;
+    }
+  });
+
+  Logger.log("=== Rows where GT=Delhi/NCR but GX is NOT (counted in State Wise only) — " + gtOnlyRows.length + " rows, total=" + Math.round(gtOnlyTotal) + " ===");
+  gtOnlyRows.forEach(function(s) { Logger.log(s); });
+
+  Logger.log("=== Rows where GX=Delhi/NCR but GT is NOT (counted in City Wise only) — " + gxOnlyRows.length + " rows, total=" + Math.round(gxOnlyTotal) + " ===");
+  gxOnlyRows.forEach(function(s) { Logger.log(s); });
+
+  Logger.log("=== NET DIFFERENCE (State Wise total \u2212 City Wise total, just from this mismatch) = " + Math.round(gtOnlyTotal - gxOnlyTotal) + " ===");
 }
 
 function testAnalysisGqHa() {
