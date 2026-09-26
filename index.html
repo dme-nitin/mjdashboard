@@ -985,7 +985,7 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
 
   <div class="panel" style="margin-top:16px;">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
-      <div class="sec-h" style="margin:0;">3. state wise prospective ytd (prospective customer)</div>
+      <div class="sec-h" style="margin:0;">3. state wise prospective ytd (all expected sale)</div>
       <div id="totalStateWiseProspective" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
     </div>
     <div style="position:relative;height:340px;"><canvas id="chartStateWiseProspective"></canvas></div>
@@ -993,7 +993,7 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
 
   <div class="panel" style="margin-top:16px;">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
-      <div class="sec-h" style="margin:0;">4. city wise prospective (prospective customer)</div>
+      <div class="sec-h" style="margin:0;">4. city wise prospective (all expected sale)</div>
       <div id="totalCityWiseProspective" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
     </div>
     <div style="position:relative;height:460px;"><canvas id="chartCityWiseProspective"></canvas></div>
@@ -1132,6 +1132,8 @@ let cProdCustMapYtd = {};
 let cForecastData     = {};
 let cPriceForecastMap = {};
 let cDemoTrend        = {};
+let cActiveLeadsByRsm = {};
+let cActiveLeadsTotal = 0;
 let cRsmYtdPipeline   = {};
 let cRsmMonthPipeline = {};
 let cTotalPipelineYtd = 0;
@@ -1707,45 +1709,37 @@ function renderActiveLeadsDetail(RS) {
   const tblEl = document.getElementById('activeLeadsTbl');
   if (!tblEl) return;
 
-  /* Exclude "Prospective Customer" from this breakdown only —
-     the global STAGES array (used elsewhere, e.g. Pipeline by
-     Stage) is left untouched. */
-  const displayStages = STAGES.filter(function(st) { return st.key !== 'prospective'; });
-
   const rsms = Array.isArray(RS) ? RS : [];
   if (!rsms.length) {
     tblEl.innerHTML = '<div style="font-size:11.5px;color:var(--tf);padding:8px 0;text-align:center;">No lead data available.</div>';
     return;
   }
 
+  /* RSM-wise Prospective Customer counts now come from
+     Report!GQ:HA (GY = RSM name) via cActiveLeadsByRsm/
+     cActiveLeadsTotal — NOT the old H1:N5 funnel-based Wants
+     Demo/Demo Done/Quotation Submitted columns, which are removed
+     from this breakdown entirely (still shown elsewhere, e.g.
+     Pipeline by Stage, untouched). */
   const rows = rsms.map(function(r, i) {
-    const f = r.funnel || {};
-    const total = displayStages.reduce(function(s, st) { return s + (f[st.key] || 0); }, 0);
+    const total = cActiveLeadsByRsm[r.name] || 0;
     return '<tr>' +
       '<td><span class="rdot" style="background:' + RC[i % RC.length] + '"></span>' + r.name + '</td>' +
-      displayStages.map(function(st) {
-        return '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;">' + (f[st.key] || 0) + '</td>';
-      }).join('') +
       '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + total + '</td>' +
     '</tr>';
   }).join('');
 
-  const colTotals = displayStages.map(function(st) {
-    return rsms.reduce(function(s, r) { return s + ((r.funnel || {})[st.key] || 0); }, 0);
-  });
-  const grandTotal = colTotals.reduce(function(s, v) { return s + v; }, 0);
+  const grandTotal = cActiveLeadsTotal;
 
   tblEl.innerHTML =
     '<table>' +
       '<thead><tr>' +
         '<th>RSM Name</th>' +
-        displayStages.map(function(st) { return '<th style="text-align:center">' + st.label + '</th>'; }).join('') +
-        '<th style="text-align:center">Total</th>' +
+        '<th style="text-align:center">Total Prospective</th>' +
       '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
       '<tfoot><tr>' +
         '<td><b>Total</b></td>' +
-        colTotals.map(function(v) { return '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;">' + v + '</td>'; }).join('') +
         '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + grandTotal + '</td>' +
       '</tr></tfoot>' +
     '</table>';
@@ -3233,7 +3227,7 @@ function render(RS, LD) {
   const tT  = RS.reduce((a,r) => a + r.target, 0);
   const tS  = RS.reduce((a,r) => a + r.sale, 0);
   const ach = tT > 0 ? tS / tT * 100 : 0;
-  const tL  = RS.reduce((a,r) => a + Object.values(r.funnel).reduce((x,y) => x+y, 0), 0);
+  const tL  = cActiveLeadsTotal; /* Active Leads (Prospective Customers) — now from Report!GQ:HA (GY column), NOT the H1:N5 funnel sum */
   const fyE = (NOW - T0) / (TF - T0) * 100;
 
   /* Total Pipeline This Month = sum of (product qty × unit price) from the Product
@@ -4127,11 +4121,11 @@ function renderAnalysisCharts(data) {
   renderBarChart('chartTopCustomersThisYear',  data.topCustomersThisYear,  true);
   setTotal('totalTopCustomersThisYear', data.topCustomersThisYearTotal, false);
 
-  renderBarChart('chartStateWiseProspective',  data.stateWiseProspective,  false);
-  setTotal('totalStateWiseProspective', data.stateWiseProspectiveTotal, true);
+  renderBarChart('chartStateWiseProspective',  data.stateWiseProspective,  true);
+  setTotal('totalStateWiseProspective', data.stateWiseProspectiveTotal, false);
 
-  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   false, false);
-  setTotal('totalCityWiseProspective', data.cityWiseProspectiveTotal, true);
+  renderBarChart('chartCityWiseProspective',   data.cityWiseProspective,   true, false);
+  setTotal('totalCityWiseProspective', data.cityWiseProspectiveTotal, false);
 
   renderGroupedBarChart('chartStateWiseTopSaleCapex', data.stateWiseTopSaleCapex);
   setTotal('totalStateWiseTopSaleCapex', data.stateWiseTopSaleCapexTotal, false);
@@ -6646,6 +6640,8 @@ function applyLiveData(data, rs) {
   if (!(data && data.rsms && Array.isArray(data.rsms))) { console.warn('[GM] Unexpected response structure:', data); return false; }
   cR = data.rsms;
   cL = normLeads(data.leads);
+  cActiveLeadsByRsm = data.activeLeadsByRsm || {};
+  cActiveLeadsTotal = Number(data.activeLeadsTotal) || 0;
   cP          = normProducts(data.products,    SEED_PRODUCTS);
   cPY         = normProducts(data.productsYtd, SEED_PRODUCTS_YTD);
   cProdCustMap     = (data.prodCustMap    && typeof data.prodCustMap    === 'object') ? data.prodCustMap    : {};
