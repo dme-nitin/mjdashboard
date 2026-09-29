@@ -1033,7 +1033,15 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
 
   <div class="panel" style="margin-top:16px;">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
-      <div class="sec-h" style="margin:0;">7. top 10 customers as per sale value ytd (sale)</div>
+      <div class="sec-h" style="margin:0;">7. state wise top 10 sale capex+consumables (sale)</div>
+      <div id="totalStateWiseTopSaleCombined" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:340px;"><canvas id="chartStateWiseTopSaleCombined"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">8. top 10 customers as per sale value ytd (sale)</div>
       <div id="totalTopCustomersBySale" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
     </div>
     <div style="position:relative;height:340px;"><canvas id="chartTopCustomersBySale"></canvas></div>
@@ -1075,6 +1083,24 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
     </div>
     <div id="confirmedCustomersTbl">
       <div style="font-size:11.5px;color:var(--tf);padding:14px 0;text-align:center;">No customers confirmed yet — tick "Confirm" in the table above to add them here.</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="ph">
+      <div class="sec-h" style="margin:0;">Top 10 State Wise</div>
+    </div>
+    <div id="prospectiveStateGraphWrap" style="position:relative;height:340px;">
+      <canvas id="prospectiveStateChart"></canvas>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div class="ph">
+      <div class="sec-h" style="margin:0;">Top 10 City Wise</div>
+    </div>
+    <div id="prospectiveCityGraphWrap" style="position:relative;height:340px;">
+      <canvas id="prospectiveCityChart"></canvas>
     </div>
   </div>
 </div>
@@ -1134,6 +1160,8 @@ let cPriceForecastMap = {};
 let cDemoTrend        = {};
 let cActiveLeadsByRsm = {};
 let cActiveLeadsTotal = 0;
+let cActiveLeadsAmountByRsm = {};
+let cActiveLeadsAmountTotal = 0;
 let cRsmYtdPipeline   = {};
 let cRsmMonthPipeline = {};
 let cTotalPipelineYtd = 0;
@@ -1720,27 +1748,33 @@ function renderActiveLeadsDetail(RS) {
      cActiveLeadsTotal — NOT the old H1:N5 funnel-based Wants
      Demo/Demo Done/Quotation Submitted columns, which are removed
      from this breakdown entirely (still shown elsewhere, e.g.
-     Pipeline by Stage, untouched). */
+     Pipeline by Stage, untouched). Total Amount (GV) is summed the
+     same way via cActiveLeadsAmountByRsm/cActiveLeadsAmountTotal. */
   const rows = rsms.map(function(r, i) {
-    const total = cActiveLeadsByRsm[r.name] || 0;
+    const total  = cActiveLeadsByRsm[r.name] || 0;
+    const amount = cActiveLeadsAmountByRsm[r.name] || 0;
     return '<tr>' +
       '<td><span class="rdot" style="background:' + RC[i % RC.length] + '"></span>' + r.name + '</td>' +
       '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + total + '</td>' +
+      '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(amount) + '</td>' +
     '</tr>';
   }).join('');
 
   const grandTotal = cActiveLeadsTotal;
+  const grandAmountTotal = cActiveLeadsAmountTotal;
 
   tblEl.innerHTML =
     '<table>' +
       '<thead><tr>' +
         '<th>RSM Name</th>' +
         '<th style="text-align:center">Total Prospective</th>' +
+        '<th style="text-align:center">Total Amount</th>' +
       '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
       '<tfoot><tr>' +
         '<td><b>Total</b></td>' +
         '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + grandTotal + '</td>' +
+        '<td style="text-align:center;font-family:\'IBM Plex Mono\',monospace;font-weight:700;color:var(--primary);">' + fmtRupee(grandAmountTotal) + '</td>' +
       '</tr></tfoot>' +
     '</table>';
 
@@ -3898,7 +3932,7 @@ function hideAnalysisSection() {
 
 function fetchAnalysisData() {
   const canvasIds = ['chartTopCustomersThisMonth','chartTopCustomersThisYear','chartStateWiseProspective',
-    'chartCityWiseProspective','chartStateWiseTopSaleCapex','chartStateWiseTopSaleConsumables','chartCityWiseTopSaleCapex','chartCityWiseTopSaleConsumables','chartTopCustomersBySale'];
+    'chartCityWiseProspective','chartStateWiseTopSaleCapex','chartStateWiseTopSaleConsumables','chartCityWiseTopSaleCapex','chartCityWiseTopSaleConsumables','chartStateWiseTopSaleCombined','chartTopCustomersBySale'];
   canvasIds.forEach(function(id) {
     const c = document.getElementById(id);
     if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
@@ -4145,6 +4179,9 @@ function renderAnalysisCharts(data) {
     (data.cityWiseTopSaleConsumables || []).map(function(r) { return { label: r.label, value: r.amount }; }),
     true);
   setTotal('totalCityWiseTopSaleConsumables', data.cityWiseTopSaleConsumablesTotal, false);
+
+  renderBarChart('chartStateWiseTopSaleCombined', data.stateWiseTopSaleCombined, true);
+  setTotal('totalStateWiseTopSaleCombined', data.stateWiseTopSaleCombinedTotal, false);
 
   renderBarChart('chartTopCustomersBySale',    data.topCustomersBySale,    true);
   setTotal('totalTopCustomersBySale', data.topCustomersBySaleTotal, false);
@@ -4719,6 +4756,232 @@ function buildProspectiveTable() {
       filterRowHtml +
       '<tbody>' + bodyRows + '</tbody>' +
     '</table>';
+
+  renderProspectiveStateCityGraphs();
+}
+
+/* ══════════════════════════════════════════════════
+   State Wise / City Wise graphs — Prospective Customers section
+   ----------------------------------------------------------------
+   Requirement: these two graphs are BLANK unless the "Expected
+   Month" filter (top of the table above) has at least one month
+   selected. Once a month IS selected, both graphs use the SAME
+   fully-filtered row set the table itself shows (state/city/
+   product/week/sale/rsm filters all apply too, exactly like the
+   table) — grouped by State for the first graph and by City for
+   the second, bar height = total Expected Sale (amount), and the
+   tooltip additionally lists every distinct Hospital Name and
+   Product contributing to that bar, since a single State/City bar
+   is usually made up of several different hospitals and products.
+══════════════════════════════════════════════════ */
+let prospectiveStateChartInstance = null;
+let prospectiveCityChartInstance  = null;
+
+/* ══════════════════════════════════════════════════
+   normalizeStateLabel(raw)
+   Client-side, GENERIC Indian-state typo tolerance for the State
+   Wise graph above — fixes the root cause (spelling mismatches
+   like "Uttrakhand"/"Uttarkhand" vs the correct "Uttarakhand"
+   silently creating two separate bars for the same state), and is
+   NOT limited to any one specific state: it checks any raw value
+   against the canonical list of Indian states/UTs and, if it's
+   not an exact match but is VERY CLOSE (small Levenshtein edit
+   distance — a couple of missing/swapped letters, the kind of
+   typo a human types), snaps it to the correct canonical name
+   automatically. A raw value that's genuinely a different place
+   (not a near-miss of any canonical name) is left exactly as
+   typed. This means any FUTURE similar typo for ANY state is
+   auto-corrected here without needing another code change. */
+const CANONICAL_INDIAN_STATES = [
+  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
+  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
+  "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab",
+  "Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh",
+  "Uttarakhand","West Bengal","Andaman and Nicobar Islands","Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu","Delhi","Delhi NCR","Jammu and Kashmir",
+  "Ladakh","Lakshadweep","Puducherry"
+];
+
+function levenshteinDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, function() { return new Array(n + 1).fill(0); });
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function normalizeStateLabel(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return trimmed;
+  const lower = trimmed.toLowerCase();
+
+  /* Exact (case-insensitive) match first — the common case. */
+  for (let i = 0; i < CANONICAL_INDIAN_STATES.length; i++) {
+    if (CANONICAL_INDIAN_STATES[i].toLowerCase() === lower) return CANONICAL_INDIAN_STATES[i];
+  }
+
+  /* Known official renamings that are too different from the
+     current name for edit-distance to catch (not typos, genuinely
+     different words) but are still common, legitimate variants. */
+  const KNOWN_RENAMES = {
+    "orissa": "Odisha", "pondicherry": "Puducherry",
+    "ncr": "Delhi NCR", "national capital region": "Delhi NCR", "delhi/ncr": "Delhi NCR"
+  };
+  if (KNOWN_RENAMES[lower]) return KNOWN_RENAMES[lower];
+
+  /* Fuzzy match — only for names close in length (avoids matching
+     a short, unrelated word to a long state name) and with an edit
+     distance small enough to clearly be a typo, not a different
+     place: max 2 edits, and never more than 20% of the name's own
+     length, so short state names still require a near-exact match. */
+  let best = null, bestDist = Infinity;
+  for (let i = 0; i < CANONICAL_INDIAN_STATES.length; i++) {
+    const candidate = CANONICAL_INDIAN_STATES[i].toLowerCase();
+    if (Math.abs(candidate.length - lower.length) > 3) continue;
+    const dist = levenshteinDistance(lower, candidate);
+    const maxAllowed = Math.min(2, Math.floor(candidate.length * 0.2));
+    if (dist <= maxAllowed && dist < bestDist) { best = CANONICAL_INDIAN_STATES[i]; bestDist = dist; }
+  }
+  return best || trimmed; /* no close-enough canonical match → keep exactly as typed */
+}
+
+function renderProspectiveStateCityGraphs() {
+  const stateWrap = document.getElementById('prospectiveStateGraphWrap');
+  const cityWrap  = document.getElementById('prospectiveCityGraphWrap');
+  if (!stateWrap || !cityWrap) return;
+
+  const monthSelected = Array.isArray(prospectiveFilters.month) && prospectiveFilters.month.length > 0;
+
+  if (!monthSelected) {
+    if (prospectiveStateChartInstance) { prospectiveStateChartInstance.destroy(); prospectiveStateChartInstance = null; }
+    if (prospectiveCityChartInstance)  { prospectiveCityChartInstance.destroy();  prospectiveCityChartInstance  = null; }
+    const placeholder = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:12px;color:var(--tf);text-align:center;padding:0 20px;">Select an Expected Month above to see this graph</div>';
+    stateWrap.innerHTML = placeholder + '<canvas id="prospectiveStateChart" style="display:none;"></canvas>';
+    cityWrap.innerHTML  = placeholder + '<canvas id="prospectiveCityChart" style="display:none;"></canvas>';
+    return;
+  }
+
+  /* Always reset to a clean, VISIBLE canvas here — the "no month
+     selected" branch above leaves behind placeholder text AND a
+     hidden (display:none) canvas; without this unconditional
+     reset, once that branch had ever run, the chart would keep
+     drawing onto that still-hidden canvas and never actually
+     become visible even after a month was selected. */
+  stateWrap.innerHTML = '<canvas id="prospectiveStateChart"></canvas>';
+  cityWrap.innerHTML  = '<canvas id="prospectiveCityChart"></canvas>';
+
+  const rows = getProspectiveRowsFiltered();
+
+  function aggregate(field) {
+    const map = {};
+    rows.forEach(function(r) {
+      let raw = String(r[field] || '').trim();
+      if (!raw) return;
+      if (field === 'state') raw = normalizeStateLabel(raw); /* fixes typos like Uttrakhand/Uttarkhand -> Uttarakhand automatically */
+      const key = raw.toLowerCase(); /* case-insensitive grouping — 'Uttarakhand' and 'uttarakhand' must be ONE bar, not two */
+      const amount = Number(r.sale) || 0;
+      if (!map[key]) map[key] = { label: raw, amount: 0, hospitals: {}, products: {} }; /* first-seen casing used as the display label */
+      map[key].amount += amount;
+      if (r.hospital) map[key].hospitals[r.hospital] = true;
+      if (r.product) map[key].products[r.product] = true;
+    });
+    return Object.keys(map)
+      .map(function(k) {
+        return {
+          label: map[k].label,
+          amount: map[k].amount,
+          hospitals: Object.keys(map[k].hospitals).sort(),
+          products: Object.keys(map[k].products).sort()
+        };
+      })
+      .sort(function(a, b) { return b.amount - a.amount; })
+      .slice(0, 10); /* Top 10 only, by amount */
+  }
+
+  drawProspectiveBarChart('prospectiveStateChart', 'prospectiveStateChartInstance', aggregate('state'));
+  drawProspectiveBarChart('prospectiveCityChart', 'prospectiveCityChartInstance', aggregate('city'));
+}
+
+/* Shared drawer for both graphs — a simple single-series bar chart
+   (Amount), with a multi-line tooltip listing the Hospitals and
+   Products behind that bar. `instanceVarName` names the module-
+   level variable (prospectiveStateChartInstance /
+   prospectiveCityChartInstance) this chart's instance is tracked
+   in, so a re-render correctly destroys the previous instance
+   first instead of stacking duplicates on the same canvas. */
+function drawProspectiveBarChart(canvasId, instanceVarName, rows) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (instanceVarName === 'prospectiveStateChartInstance' && prospectiveStateChartInstance) {
+    prospectiveStateChartInstance.destroy();
+    prospectiveStateChartInstance = null;
+  }
+  if (instanceVarName === 'prospectiveCityChartInstance' && prospectiveCityChartInstance) {
+    prospectiveCityChartInstance.destroy();
+    prospectiveCityChartInstance = null;
+  }
+
+  if (!rows.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '12px Inter, sans-serif';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data for the selected filters', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const labels  = rows.map(function(r) { return r.label; });
+  const amounts = rows.map(function(r) { return r.amount; });
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{ data: amounts, backgroundColor: '#2563EB', borderRadius: 4, maxBarThickness: 36 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) { return 'Amount: ' + fmtRupeeShort(ctx.parsed.y); },
+            afterLabel: function(ctx) {
+              const row = rows[ctx.dataIndex];
+              const lines = [];
+              if (row.hospitals.length) lines.push('Hospitals: ' + row.hospitals.join(', '));
+              if (row.products.length) lines.push('Products: ' + row.products.join(', '));
+              return lines;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#0F172A', font: { size: 10.5, weight: '500' }, maxRotation: 45, minRotation: 0, autoSkip: false }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#E2E8F0' },
+          ticks: { color: '#475569', font: { size: 10 }, callback: function(val) { return fmtRupeeShort(val); } }
+        }
+      }
+    }
+  });
+
+  if (instanceVarName === 'prospectiveStateChartInstance') prospectiveStateChartInstance = chart;
+  else if (instanceVarName === 'prospectiveCityChartInstance') prospectiveCityChartInstance = chart;
 }
 
 /* Opens/closes a column's checkbox panel. Only one panel open at
@@ -6642,6 +6905,8 @@ function applyLiveData(data, rs) {
   cL = normLeads(data.leads);
   cActiveLeadsByRsm = data.activeLeadsByRsm || {};
   cActiveLeadsTotal = Number(data.activeLeadsTotal) || 0;
+  cActiveLeadsAmountByRsm = data.activeLeadsAmountByRsm || {};
+  cActiveLeadsAmountTotal = Number(data.activeLeadsAmountTotal) || 0;
   cP          = normProducts(data.products,    SEED_PRODUCTS);
   cPY         = normProducts(data.productsYtd, SEED_PRODUCTS_YTD);
   cProdCustMap     = (data.prodCustMap    && typeof data.prodCustMap    === 'object') ? data.prodCustMap    : {};
