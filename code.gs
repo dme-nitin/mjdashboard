@@ -1961,6 +1961,38 @@ function getAnalysisData() {
     return Math.round(total);
   }
 
+  /* ── Graph 9: Report!HC:HK (9 cols, HC = col 211) — SEPARATE
+     range from the Payment Summary's HC:HI block above (this reads
+     2 MORE columns, HJ and HK, beyond that block — adding future
+     columns after HK would not affect either read, since both are
+     fixed-width reads from a fixed starting column):
+       HJ (col 218, index 7 in this 9-col read) = Company Name
+       HK (col 219, index 8)                    = Sale Amount
+     Every row is already "April till date" data as maintained in
+     the sheet — no date filtering is applied here. Companies are
+     merged case-insensitively (so "ABC Ltd" and "abc ltd" count as
+     the same company), summing HK, and the TOP 5 by total amount
+     are shown, highest first. */
+  var businessTillDateMap = {};
+  try {
+    var hcHkLastRow = rep.getLastRow();
+    if (hcHkLastRow >= 2) {
+      var hcHkData = rep.getRange(2, 211, hcHkLastRow - 1, 9).getValues();
+      hcHkData.forEach(function(row) {
+        var companyRaw = String(row[7] || "").trim(); /* HJ */
+        if (!companyRaw) return;
+        var amountRaw = row[8]; /* HK */
+        var amount = typeof amountRaw === "number" ? amountRaw
+                     : (parseFloat(String(amountRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+        if (amount === 0) return;
+
+        var key = companyRaw.toLowerCase();
+        if (!businessTillDateMap[key]) businessTillDateMap[key] = { label: companyRaw, value: 0 };
+        businessTillDateMap[key].value += amount;
+      });
+    }
+  } catch (e) { Logger.log("getAnalysisData HC:HK (Graph 9) ERROR: " + e.message); }
+
   return {
     topCustomersThisMonth : topNFromMap(topCustomersThisMonthMap, 10),
     topCustomersThisMonthTotal : Math.round(topCustomersThisMonthFullTotal), /* full total across ALL prospective customers this month, not just the top 10 shown — used in the heading */
@@ -1981,7 +2013,9 @@ function getAnalysisData() {
     cityWiseTopSaleConsumables : topNAmountQty(cityWiseTopSaleConsumablesMap, 10),
     cityWiseTopSaleConsumablesTotal : sumMapField(cityWiseTopSaleConsumablesMap, "amount"),
     topCustomersBySale    : topNFromMap(topCustomersBySaleMap, 10),
-    topCustomersBySaleTotal : sumMapField(topCustomersBySaleMap, "value")
+    topCustomersBySaleTotal : sumMapField(topCustomersBySaleMap, "value"),
+    businessTillDateCompanyWise      : topNFromMap(businessTillDateMap, 5),
+    businessTillDateCompanyWiseTotal : sumMapField(businessTillDateMap, "value")
   };
 }
 
