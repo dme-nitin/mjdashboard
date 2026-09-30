@@ -1046,6 +1046,14 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
     </div>
     <div style="position:relative;height:340px;"><canvas id="chartTopCustomersBySale"></canvas></div>
   </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div class="sec-h" style="margin:0;">9. business till date company wise (top 5)</div>
+      <div id="totalBusinessTillDateCompanyWise" style="font-size:12px;font-weight:700;color:var(--primary);font-family:'IBM Plex Mono',monospace;white-space:nowrap;"></div>
+    </div>
+    <div style="position:relative;height:340px;"><canvas id="chartBusinessTillDateCompanyWise"></canvas></div>
+  </div>
 </div>
 
 <div id="prospective-section" style="display:none;">
@@ -3932,7 +3940,7 @@ function hideAnalysisSection() {
 
 function fetchAnalysisData() {
   const canvasIds = ['chartTopCustomersThisMonth','chartTopCustomersThisYear','chartStateWiseProspective',
-    'chartCityWiseProspective','chartStateWiseTopSaleCapex','chartStateWiseTopSaleConsumables','chartCityWiseTopSaleCapex','chartCityWiseTopSaleConsumables','chartStateWiseTopSaleCombined','chartTopCustomersBySale'];
+    'chartCityWiseProspective','chartStateWiseTopSaleCapex','chartStateWiseTopSaleConsumables','chartCityWiseTopSaleCapex','chartCityWiseTopSaleConsumables','chartStateWiseTopSaleCombined','chartTopCustomersBySale','chartBusinessTillDateCompanyWise'];
   canvasIds.forEach(function(id) {
     const c = document.getElementById(id);
     if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
@@ -4185,6 +4193,9 @@ function renderAnalysisCharts(data) {
 
   renderBarChart('chartTopCustomersBySale',    data.topCustomersBySale,    true);
   setTotal('totalTopCustomersBySale', data.topCustomersBySaleTotal, false);
+
+  renderBarChart('chartBusinessTillDateCompanyWise', data.businessTillDateCompanyWise, true);
+  setTotal('totalBusinessTillDateCompanyWise', data.businessTillDateCompanyWiseTotal, false);
 }
 
 function fetchUniqueAddedMonthReport() {
