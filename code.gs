@@ -340,6 +340,14 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(anData)).setMimeType(ContentService.MimeType.JSON);
   }
 
+  /* ── Database section (read-only load; saving goes through
+     google.script.run saveDatabaseNotes only) ── */
+  if (section === "databaseSection") {
+    var dbData = getDatabaseSection();
+    if (cb) return ContentService.createTextOutput(cb + "(" + JSON.stringify(dbData) + ");").setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(JSON.stringify(dbData)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   /* ── Expected Payment Receive This Month — used by the frontend's JSONP
      fallback path. Same data as getMonthlyPayments(), just JSONP-wrapped. ── */
   if (section === "monthlyPayments") {
@@ -7274,4 +7282,185 @@ function _buildExpectedPaymentPdf(personName, rows, weekStartIso, weekEndIso) {
 
   var htmlBlob = Utilities.newBlob(html, "text/html", "report.html");
   return htmlBlob.getAs("application/pdf");
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   DATABASE SECTION — Demo-product records (Report!BI:BQ, same
+   source as Prospective Customers) + permanent remarks storage in
+   a dedicated "Database_Notes" sheet. The source range is only
+   ever READ here; nothing below writes to the Report sheet.
+══════════════════════════════════════════════════════════════ */
+var DB_NOTES_TAB  = "Database_Notes";
+var DB_NOTE_FIELDS = ["fear", "need", "desire", "frustation", "objection"];
+var DB_NOTES_HEADERS = ["Key", "Hospital", "Product", "State", "RSM",
+  "Fear", "Need", "Desire", "Frustation", "Objection", "Updated At", "Updated By"];
+
+function dbNorm_(v) {
+  return String(v == null ? "" : v).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/* Splits a BK cell into individual product names (trimmed, de-duplicated
+   case-insensitively, original spelling of first occurrence kept). */
+function dbSplitProducts_(cell) {
+  var parts = String(cell == null ? "" : cell).split(/[,;\/+&\n\r]+|\s+and\s+/i);
+  var seen = {}, out = [];
+  parts.forEach(function(p) {
+    var t = String(p).replace(/\s+/g, " ").trim();
+    if (!t) return;
+    var k = t.toLowerCase();
+    if (seen[k]) return;
+    seen[k] = true;
+    out.push(t);
+  });
+  return out;
+}
+
+function dbTokenMatches_(token, productId) {
+  var t = String(token).toLowerCase();
+  if (productId === "fibroscan") return t.indexOf("fibroscan") !== -1 || t.indexOf("fibro scan") !== -1;
+  if (productId === "cbd") return /(^|[^a-z])cbd([^a-z]|$)/.test(t);
+  return false;
+}
+
+function dbGetOrCreateNotesSheet_(createIfMissing) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(DB_NOTES_TAB);
+  if (!sh && createIfMissing) {
+    sh = ss.insertSheet(DB_NOTES_TAB);
+    sh.getRange(1, 1, 1, DB_NOTES_HEADERS.length).setValues([DB_NOTES_HEADERS]).setFontWeight("bold");
+    sh.setFrozenRows(1);
+  }
+  return sh; /* null when it does not exist yet and createIfMissing is false */
+}
+
+/* Reads every saved note into { key: {row, fear, need, ...} } */
+function dbReadNotes_(sh) {
+  var map = {};
+  if (!sh) return map;
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return map;
+  var vals = sh.getRange(2, 1, lastRow - 1, 10).getValues();
+  vals.forEach(function(r, i) {
+    var key = String(r[0] || "");
+    if (!key || map[key]) return; /* first row wins; never duplicate */
+    map[key] = { row: i + 2, fear: String(r[5] || ""), need: String(r[6] || ""),
+                 desire: String(r[7] || ""), frustation: String(r[8] || ""),
+                 objection: String(r[9] || "") };
+  });
+  return map;
+}
+
+/* All source records from Report!BI:BQ (BI City, BJ Hospital, BK Product,
+   BL State, BM Month, BN Exec email, BO Approx Sale, BP RSM, BQ Week),
+   each with a stable key. */
+function dbReadSourceRecords_() {
+  var rep = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPORT_TAB);
+  if (!rep) throw new Error("Report sheet not found");
+  var lastRow = rep.getLastRow();
+  if (lastRow < 2) return [];
+  var data = rep.getRange(2, 61, lastRow - 1, 9).getValues();
+  var occ = {}, out = [];
+  data.forEach(function(r) {
+    var city = String(r[0] || "").trim(), hospital = String(r[1] || "").trim();
+    var productRaw = String(r[2] || "").trim(), state = String(r[3] || "").trim();
+    var rsm = String(r[7] || "").trim();
+    if (!hospital) return;
+    var saleRaw = r[6];
+    var sale = typeof saleRaw === "number" ? saleRaw
+      : (parseFloat(String(saleRaw || "0").replace(/[^0-9.-]/g, "")) || 0);
+    var tokens = dbSplitProducts_(productRaw);
+    var sortedTokens = tokens.map(function(t) { return t.toLowerCase(); }).sort().join("|");
+    var base = [dbNorm_(hospital), dbNorm_(state), dbNorm_(city), dbNorm_(rsm), sortedTokens].join("||");
+    occ[base] = (occ[base] || 0) + 1;
+    var key = occ[base] === 1 ? base : base + "##" + occ[base];
+    out.push({ key: key, hospital: hospital, product: productRaw, tokens: tokens,
+               state: state, rsm: rsm, sale: sale });
+  });
+  return out;
+}
+
+/* Loads latest source records + saved remarks. Always returns ALL records
+   with a "products" id list (fibroscan / cbd); the frontend filters. */
+function getDatabaseSection() {
+  try {
+    var recs = dbReadSourceRecords_();
+    var notes = dbReadNotes_(dbGetOrCreateNotesSheet_(false));
+    var rows = recs.map(function(r) {
+      var ids = [];
+      ["fibroscan", "cbd"].forEach(function(pid) {
+        if (r.tokens.some(function(t) { return dbTokenMatches_(t, pid); })) ids.push(pid);
+      });
+      var n = notes[r.key] || {};
+      return { key: r.key, hospital: r.hospital, product: r.product, state: r.state,
+               rsm: r.rsm, sale: r.sale, productIds: ids,
+               fear: n.fear || "", need: n.need || "", desire: n.desire || "",
+               frustation: n.frustation || "", objection: n.objection || "" };
+    }).filter(function(r) { return r.productIds.length > 0; });
+    return { ok: true, rows: rows, products: [{ id: "fibroscan", label: "Fibroscan" }, { id: "cbd", label: "CBD" }] };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* changes: [{key, hospital, product, state, rsm, fear, need, desire, frustation, objection}]
+   Updates only the given keys; appends unknown keys; never touches the
+   Report sheet and never deletes rows. */
+function saveDatabaseNotes(changes) {
+  var lock = LockService.getScriptLock();
+  try {
+    if (!changes || !changes.length) return { ok: true, saved: 0, message: "No changes to save." };
+    if (!lock.tryLock(30000)) return { ok: false, error: "Server busy — another save is in progress. Please try again." };
+    var sh = dbGetOrCreateNotesSheet_(true);
+    var notes = dbReadNotes_(sh);
+    var who = ""; try { who = Session.getActiveUser().getEmail() || ""; } catch (e0) {}
+    var now = new Date();
+    var saved = 0, appended = [];
+    changes.forEach(function(c) {
+      var key = String(c.key || "");
+      if (!key) return;
+      var vals = DB_NOTE_FIELDS.map(function(f) { return String(c[f] == null ? "" : c[f]).slice(0, 40000); });
+      var ex = notes[key];
+      if (ex) {
+        var same = DB_NOTE_FIELDS.every(function(f, i) { return ex[f] === vals[i]; });
+        if (same) return;
+        sh.getRange(ex.row, 6, 1, 5).setNumberFormat("@").setValues([vals]);
+        sh.getRange(ex.row, 11, 1, 2).setValues([[now, who]]);
+        saved++;
+      } else {
+        if (vals.every(function(v) { return v === ""; })) return; /* nothing to store */
+        appended.push([key, String(c.hospital || ""), String(c.product || ""), String(c.state || ""),
+          String(c.rsm || "")].concat(vals).concat([now, who]));
+        notes[key] = { row: -1 }; /* guards against duplicate keys in one batch */
+        saved++;
+      }
+    });
+    if (appended.length) {
+      var start = sh.getLastRow() + 1;
+      sh.getRange(start, 1, appended.length, 10).setNumberFormat("@");
+      sh.getRange(start, 1, appended.length, 12).setValues(appended);
+    }
+    SpreadsheetApp.flush();
+    return { ok: true, saved: saved, message: saved + " record(s) saved." };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    try { lock.releaseLock(); } catch (e2) {}
+  }
+}
+
+/* Editor-runnable check: logs token + product counts and notes sheet state. */
+function testDatabaseSource() {
+  var recs = dbReadSourceRecords_();
+  var tokenCount = {};
+  recs.forEach(function(r) { r.tokens.forEach(function(t) { var k = t.toLowerCase(); tokenCount[k] = (tokenCount[k] || 0) + 1; }); });
+  Logger.log("Source records: " + recs.length);
+  Object.keys(tokenCount).sort(function(a, b) { return tokenCount[b] - tokenCount[a]; })
+    .forEach(function(k) { Logger.log("token '" + k + "' → " + tokenCount[k]); });
+  var d = getDatabaseSection();
+  var f = d.rows.filter(function(r) { return r.productIds.indexOf("fibroscan") !== -1; }).length;
+  var c = d.rows.filter(function(r) { return r.productIds.indexOf("cbd") !== -1; }).length;
+  Logger.log("Fibroscan rows: " + f + " | CBD rows: " + c + " | total shown: " + d.rows.length);
+  var keys = {}, dup = 0; d.rows.forEach(function(r) { if (keys[r.key]) dup++; keys[r.key] = 1; });
+  Logger.log("Duplicate keys: " + dup);
 }
