@@ -3952,7 +3952,7 @@ let databaseSectionOpen = false;
 let dbRows = [];
 let dbEditMode = false;
 let dbDirty = {};
-const DB_FIELDS = [['fear','Fear'],['need','Need'],['desire','Desire'],['frustation','Frustation'],['objection','Objection']];
+const DB_FIELDS = [['need','Need'],['desire','Desire'],['fear','Fear'],['frustation','Frustation'],['objection','Objection']];
 
 function dbEsc(v) {
   return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
