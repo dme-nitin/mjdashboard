@@ -481,6 +481,9 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
   <button class="nav-btn" id="analysisBtn" onclick="toggleAnalysisSection()" title="Show Analysis section">
     <span class="pd" style="background:#7C3AED;"></span>Analysis
   </button>
+  <button class="nav-btn" id="databaseBtn" onclick="toggleDatabaseSection()" title="Show Database section">
+    <span class="pd" style="background:#0891B2;"></span>Database
+  </button>
 </div>
 
 <div id="restricted-rsm-section" style="display:none;">
@@ -953,6 +956,40 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
       <div style="font-size:11px;color:var(--tf);padding:8px 0;">Loading…</div>
     </div>
     <div id="uaMonthPagination" style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px;font-size:11px;color:var(--tf);"></div>
+  </div>
+</div>
+
+<div id="database-section" style="display:none;">
+  <div class="panel" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div class="sec-h" style="margin:0;">Database</div>
+      <div class="sec-sub" style="margin:4px 0 0;">Demo product records · remarks are saved permanently in the spreadsheet</div>
+    </div>
+    <button class="rbtn" style="background:linear-gradient(135deg,#475569,#334155);" onclick="toggleDatabaseSection()">
+      ← Back to Dashboard
+    </button>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label for="dbProductSel" style="font-size:12px;font-weight:700;color:var(--ink);">Product</label>
+        <select id="dbProductSel" onchange="dbOnProductChange()" style="padding:7px 10px;border:1px solid #CBD5E1;border-radius:8px;font-size:13px;background:#fff;">
+          <option value="fibroscan">Fibroscan</option>
+          <option value="cbd">CBD</option>
+        </select>
+        <span id="dbCount" style="font-size:12px;color:#64748B;"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="dbMsg" style="font-size:12px;font-weight:600;"></span>
+        <button class="rbtn" id="dbEditBtn" onclick="dbStartEdit()">Edit</button>
+        <button class="rbtn" id="dbSaveBtn" onclick="dbSave()" disabled>Save</button>
+      </div>
+    </div>
+    <div id="dbLoading" style="display:none;padding:18px;text-align:center;color:#64748B;font-size:13px;">Loading database…</div>
+    <div id="dbTableWrap" style="overflow-x:auto;border:1px solid #E2E8F0;border-radius:8px;">
+      <table id="dbTbl" style="border-collapse:collapse;width:100%;min-width:1500px;font-size:12.5px;"></table>
+    </div>
   </div>
 </div>
 
@@ -3509,7 +3546,8 @@ function updateNavActiveStates() {
     accountsBtn: typeof accountsSectionOpen !== 'undefined' && accountsSectionOpen,
     hrBtn: typeof hrSectionOpen !== 'undefined' && hrSectionOpen,
     prospectiveBtn: typeof prospectiveSectionOpen !== 'undefined' && prospectiveSectionOpen,
-    analysisBtn: typeof analysisSectionOpen !== 'undefined' && analysisSectionOpen
+    analysisBtn: typeof analysisSectionOpen !== 'undefined' && analysisSectionOpen,
+    databaseBtn: typeof databaseSectionOpen !== 'undefined' && databaseSectionOpen
   };
   Object.keys(states).forEach(function(id) {
     const btn = document.getElementById(id);
@@ -3568,6 +3606,7 @@ function toggleMJSection() {
     hideSalesSection();
     hideProspectiveSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     hideUniqueAddedMonthSection();
     mainView.style.display = 'none';
     mjSec.style.display    = 'block';
@@ -3608,6 +3647,7 @@ function toggleSalesSection() {
     hideMJSection();
     hideProspectiveSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     hideUniqueAddedMonthSection();
     mainView.style.display = 'none';
     salesSec.style.display = 'block';
@@ -3736,6 +3776,7 @@ function toggleAccountsSection() {
     hideHRSection();
     hideProspectiveSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     hideUniqueAddedMonthSection();
     hideMJSection();
     hideSalesSection();
@@ -3783,6 +3824,7 @@ function toggleHRSection() {
     hideAccountsSection();
     hideProspectiveSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     hideUniqueAddedMonthSection();
     hideMJSection();
     hideSalesSection();
@@ -3835,6 +3877,7 @@ function toggleProspectiveSection() {
     hideSalesSection();
     hideUniqueAddedMonthSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     mainView.style.display = 'none';
     pSec.style.display     = 'block';
     if (!prospectiveListLoaded) fetchProspectiveCustomersList();
@@ -3881,6 +3924,7 @@ function toggleUniqueAddedMonthSection() {
     hideSalesSection();
     hideProspectiveSection();
     hideAnalysisSection();
+    hideDatabaseSection();
     mainView.style.display = 'none';
     sec.style.display      = 'block';
     const labelEl = document.getElementById('uaMonthLabel');
@@ -3896,6 +3940,185 @@ function hideUniqueAddedMonthSection() {
   const sec = document.getElementById('unique-added-month-section');
   if (sec) sec.style.display = 'none';
   uniqueAddedMonthSectionOpen = false;
+}
+
+/* ══════════════════════════════════════════════════
+   DATABASE SECTION — Fibroscan / CBD records with permanent remarks
+   (Fear, Need, Desire, Frustation, Objection). Source rows + saved
+   remarks come from the backend; browser memory only holds the
+   current edit session. Nothing here touches any other section.
+══════════════════════════════════════════════════ */
+let databaseSectionOpen = false;
+let dbRows = [];
+let dbEditMode = false;
+let dbDirty = {};
+const DB_FIELDS = [['fear','Fear'],['need','Need'],['desire','Desire'],['frustation','Frustation'],['objection','Objection']];
+
+function dbEsc(v) {
+  return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function dbSetMsg(text, ok) {
+  const el = document.getElementById('dbMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = ok ? '#15803D' : '#B91C1C';
+}
+function dbHasUnsaved() { return Object.keys(dbDirty).length > 0; }
+
+function toggleDatabaseSection() {
+  const mainView = document.getElementById('mainView');
+  const sec = document.getElementById('database-section');
+  if (!mainView || !sec) return;
+  if (databaseSectionOpen && dbHasUnsaved() && !confirm('You have unsaved changes. Leave without saving?')) return;
+  databaseSectionOpen = !databaseSectionOpen;
+  if (databaseSectionOpen) {
+    hideSalesExecSection(); hideAccountsSection(); hideHRSection(); hideMJSection();
+    hideSalesSection(); hideProspectiveSection(); hideUniqueAddedMonthSection(); hideAnalysisSection();
+    mainView.style.display = 'none';
+    sec.style.display = 'block';
+    dbLoad();
+  } else {
+    dbDirty = {}; dbEditMode = false;
+    sec.style.display = 'none';
+    mainView.style.display = '';
+  }
+  updateNavActiveStates();
+}
+
+function hideDatabaseSection() {
+  const sec = document.getElementById('database-section');
+  if (sec) sec.style.display = 'none';
+  databaseSectionOpen = false;
+  dbDirty = {}; dbEditMode = false;
+}
+
+function dbLoad() {
+  const loading = document.getElementById('dbLoading');
+  if (loading) loading.style.display = 'block';
+  dbSetMsg('', true);
+  const done = function(data) {
+    if (loading) loading.style.display = 'none';
+    if (!data || !data.ok) {
+      dbSetMsg('Could not load: ' + ((data && data.error) || 'unknown error'), false);
+      return;
+    }
+    dbRows = data.rows || [];
+    dbDirty = {}; dbEditMode = false;
+    dbRender();
+  };
+  const fail = function(err) {
+    if (loading) loading.style.display = 'none';
+    dbSetMsg('Could not load: ' + ((err && err.message) || err || 'network error'), false);
+  };
+  if (IS_GAS) {
+    google.script.run.withSuccessHandler(done).withFailureHandler(fail).getDatabaseSection();
+  } else {
+    const cb = '__gmdbcb' + Date.now();
+    const timer = setTimeout(function() { cleanup(); fail('timeout'); }, 20000);
+    function cleanup() { clearTimeout(timer); const s0 = document.getElementById('__gm_db_j'); if (s0) s0.remove(); delete window[cb]; }
+    window[cb] = function(d) { cleanup(); done(d); };
+    const s = document.createElement('script');
+    s.id = '__gm_db_j';
+    s.src = DEPLOYED_URL + '?callback=' + cb + '&section=databaseSection&_=' + Date.now();
+    s.onerror = function() { cleanup(); fail('network error'); };
+    document.head.appendChild(s);
+  }
+}
+
+function dbCurrentProduct() { return document.getElementById('dbProductSel').value; }
+
+function dbOnProductChange() { dbRender(); }
+
+function dbRender() {
+  const tbl = document.getElementById('dbTbl');
+  if (!tbl) return;
+  const pid = dbCurrentProduct();
+  const rows = dbRows.filter(function(r) { return r.productIds.indexOf(pid) !== -1; });
+  const th = 'style="text-align:left;padding:9px 10px;background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:#475569;white-space:nowrap;"';
+  let h = '<thead><tr>' +
+    ['Hospital Name','Demo Product','State','RSM Name','Approx Expecting Sale'].map(function(t) { return '<th ' + th + '>' + t + '</th>'; }).join('') +
+    DB_FIELDS.map(function(f) { return '<th ' + th.replace('text-align:left', 'text-align:center') + '>' + f[1] + '</th>'; }).join('') + '</tr></thead><tbody>';
+  const td = 'style="padding:8px 10px;border-bottom:1px solid #EEF2F7;vertical-align:top;"';
+  rows.forEach(function(r) {
+    const cur = dbDirty[r.key] || r;
+    h += '<tr>' +
+      '<td ' + td + '>' + dbEsc(r.hospital) + '</td>' +
+      '<td ' + td + '>' + dbEsc(r.product) + '</td>' +
+      '<td ' + td + '>' + dbEsc(r.state) + '</td>' +
+      '<td ' + td + '>' + dbEsc(r.rsm) + '</td>' +
+      '<td ' + td + '><span style="color:#2563EB;font-weight:700;font-family:\'IBM Plex Mono\',monospace;white-space:nowrap;">' + (r.sale ? fmtRupee(r.sale) : '') + '</span></td>' +
+      DB_FIELDS.map(function(f) {
+        return '<td ' + td + '><textarea data-key="' + dbEsc(r.key) + '" data-field="' + f[0] + '" rows="3" ' +
+          (dbEditMode ? '' : 'readonly ') +
+          'oninput="dbOnInput(this)" style="width:230px;min-height:64px;resize:vertical;padding:6px 8px;border:1px solid ' +
+          (dbEditMode ? '#93C5FD' : '#E2E8F0') + ';border-radius:6px;font:inherit;background:' + (dbEditMode ? '#fff' : '#F8FAFC') + ';">' +
+          dbEsc(cur[f[0]]) + '</textarea></td>';
+      }).join('') + '</tr>';
+  });
+  if (!rows.length) h += '<tr><td colspan="10" style="padding:18px;text-align:center;color:#64748B;">No records for this product.</td></tr>';
+  tbl.innerHTML = h + '</tbody>';
+  document.getElementById('dbCount').textContent = rows.length + ' record(s)';
+  document.getElementById('dbEditBtn').disabled = dbEditMode;
+  document.getElementById('dbSaveBtn').disabled = !dbEditMode;
+}
+
+function dbStartEdit() {
+  dbEditMode = true;
+  dbSetMsg('Edit mode — change remarks, then click Save.', true);
+  dbRender();
+}
+
+function dbOnInput(ta) {
+  const key = ta.getAttribute('data-key'), field = ta.getAttribute('data-field');
+  const base = dbRows.find(function(r) { return r.key === key; });
+  if (!base) return;
+  if (!dbDirty[key]) {
+    dbDirty[key] = {};
+    DB_FIELDS.forEach(function(f) { dbDirty[key][f[0]] = base[f[0]]; });
+  }
+  dbDirty[key][field] = ta.value;
+}
+
+function dbSave() {
+  if (!dbEditMode) return;
+  const changes = [];
+  Object.keys(dbDirty).forEach(function(key) {
+    const base = dbRows.find(function(r) { return r.key === key; });
+    if (!base) return;
+    const d = dbDirty[key];
+    if (DB_FIELDS.every(function(f) { return d[f[0]] === base[f[0]]; })) return;
+    changes.push({ key: key, hospital: base.hospital, product: base.product, state: base.state, rsm: base.rsm,
+      fear: d.fear, need: d.need, desire: d.desire, frustation: d.frustation, objection: d.objection });
+  });
+  if (!changes.length) {
+    dbEditMode = false; dbDirty = {};
+    dbSetMsg('No changes to save.', true);
+    dbRender();
+    return;
+  }
+  if (!IS_GAS) { dbSetMsg('Saving works only from the deployed dashboard link.', false); return; }
+  const btn = document.getElementById('dbSaveBtn');
+  btn.disabled = true; dbSetMsg('Saving…', true);
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res || !res.ok) {
+        btn.disabled = false;
+        dbSetMsg('Save failed: ' + ((res && res.error) || 'unknown error') + ' (your edits are still on screen)', false);
+        return;
+      }
+      changes.forEach(function(c) {
+        const base = dbRows.find(function(r) { return r.key === c.key; });
+        if (base) DB_FIELDS.forEach(function(f) { base[f[0]] = c[f[0]]; });
+      });
+      dbDirty = {}; dbEditMode = false;
+      dbSetMsg('✔ Saved successfully (' + res.saved + ' record' + (res.saved === 1 ? '' : 's') + ').', true);
+      dbRender();
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      dbSetMsg('Save failed: ' + ((err && err.message) || err) + ' (your edits are still on screen)', false);
+    })
+    .saveDatabaseNotes(changes);
 }
 
 /* ══════════════════════════════════════════════════
@@ -3922,6 +4145,7 @@ function toggleAnalysisSection() {
     hideSalesSection();
     hideProspectiveSection();
     hideUniqueAddedMonthSection();
+    hideDatabaseSection();
     mainView.style.display = 'none';
     sec.style.display      = 'block';
     if (!analysisDataLoaded) fetchAnalysisData();
@@ -6995,6 +7219,7 @@ function applyRestrictedAccessModeIfNeeded(RS) {
   hideSalesSection(); hideMJSection(); hideAccountsSection(); hideHRSection();
   hideProspectiveSection(); hideUniqueAddedMonthSection();
   if (typeof hideAnalysisSection === 'function') hideAnalysisSection();
+  if (typeof hideDatabaseSection === 'function') hideDatabaseSection();
 
   var backBtn = document.querySelector('#salesExecSection .rbtn');
   if (backBtn) {
