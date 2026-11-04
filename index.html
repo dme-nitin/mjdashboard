@@ -484,6 +484,9 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
   <button class="nav-btn" id="databaseBtn" onclick="toggleDatabaseSection()" title="Show Database section">
     <span class="pd" style="background:#0891B2;"></span>Database
   </button>
+  <button class="nav-btn" id="serviceFmsBtn" onclick="openServiceFms()" title="Open Service FMS in a new tab">
+    <span class="pd" style="background:#EA580C;"></span>Service FMS
+  </button>
 </div>
 
 <div id="restricted-rsm-section" style="display:none;">
@@ -970,7 +973,7 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
     </button>
   </div>
 
-  <div class="panel" style="margin-top:16px;">
+  <div class="panel" id="dbTablePanel" style="margin-top:16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
       <div style="display:flex;align-items:center;gap:8px;">
         <label for="dbProductSel" style="font-size:12px;font-weight:700;color:var(--ink);">Product</label>
@@ -981,7 +984,7 @@ console.log('[GM-DEBUG] Injected restrictRsm =', JSON.stringify(window.__INJECTE
         <span id="dbCount" style="font-size:12px;color:#64748B;"></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
-        <span id="dbMsg" style="font-size:12px;font-weight:600;"></span>
+        <span id="dbMsg" class="no-print" style="font-size:12px;font-weight:600;"></span>
         <button class="rbtn" id="dbEditBtn" onclick="dbStartEdit()">Edit</button>
         <button class="rbtn" id="dbSaveBtn" onclick="dbSave()" disabled>Save</button>
       </div>
@@ -3992,24 +3995,28 @@ function hideDatabaseSection() {
   dbDirty = {}; dbEditMode = false;
 }
 
-function dbLoad() {
+function dbLoad(attempt) {
+  attempt = attempt || 1;
   const loading = document.getElementById('dbLoading');
   if (loading) loading.style.display = 'block';
-  dbSetMsg('', true);
+  dbSetMsg(attempt > 1 ? 'Server slow — retrying (' + attempt + '/3)…' : '', true);
   const done = function(data) {
     if (loading) loading.style.display = 'none';
-    if (!data || !data.ok) {
-      dbSetMsg('Could not load: ' + ((data && data.error) || 'unknown error'), false);
-      return;
-    }
+    if (!data || !data.ok) { retryOrFail((data && data.error) || 'unknown error'); return; }
     dbRows = data.rows || [];
     dbDirty = {}; dbEditMode = false;
+    dbSetMsg('', true);
     dbRender();
   };
-  const fail = function(err) {
+  const retryOrFail = function(msg) {
+    if (attempt < 3 && /DEADLINE|timeout|storage|network/i.test(String(msg))) {
+      setTimeout(function() { if (databaseSectionOpen) dbLoad(attempt + 1); }, 2500 * attempt);
+      return;
+    }
     if (loading) loading.style.display = 'none';
-    dbSetMsg('Could not load: ' + ((err && err.message) || err || 'network error'), false);
+    dbSetMsg('Could not load: ' + msg + ' — close and reopen Database to try again.', false);
   };
+  const fail = function(err) { retryOrFail((err && err.message) || err || 'network error'); };
   if (IS_GAS) {
     google.script.run.withSuccessHandler(done).withFailureHandler(fail).getDatabaseSection();
   } else {
@@ -4630,6 +4637,11 @@ function openRsmReviewDashboard() {
    same simple pattern as Quotation Form/AMC/CMC/RSM Review
    Dashboard: opens directly in a new browser tab.
 ══════════════════════════════════════════════════ */
+const SERVICE_FMS_URL = "https://script.google.com/macros/s/AKfycby83AnubBcTTpy4VY1jOKtZqSEiZc_1OJ7NlfJOY9StElQWen858QW78dYS0I1Ym6a-/exec";
+function openServiceFms() {
+  window.open(SERVICE_FMS_URL, '_blank');
+}
+
 function openReorderApp() {
   window.open(REORDER_URL, '_blank');
 }
@@ -8047,6 +8059,18 @@ function printPanelElement(panelEl, title) {
     elToStrip.remove();
   });
 
+  /* Database panel: textareas would print clipped/empty, so swap them
+     for plain text blocks (full text, line breaks kept); let the wide
+     table fit the page width. Only affects clones — live page untouched. */
+  clone.querySelectorAll('textarea').forEach(function(ta) {
+    const d = document.createElement('div');
+    d.textContent = ta.value || ta.textContent || '';
+    d.style.cssText = 'white-space:pre-wrap;word-break:break-word;min-width:90px;';
+    ta.parentNode.replaceChild(d, ta);
+  });
+  const dbCloneTbl = clone.querySelector('#dbTbl');
+  if (dbCloneTbl) { dbCloneTbl.style.minWidth = '0'; dbCloneTbl.style.fontSize = '10px'; }
+
   /* Force every scrollable/height-limited container in the clone
      to show its FULL content — many panels use overflow-y:auto
      with a max-height or flex:1 so they fit on screen, which
@@ -8211,7 +8235,8 @@ function injectExplicitPrintTargets() {
     { id: 'saleTrendDetail',     title: 'Sale Trend (Product Wise)' },
     { id: 'activeLeadsDetail',   title: 'Active Leads — RSM-wise & Stage-wise Breakdown' },
     { id: 'mjInventoryPanel',    title: 'Inventory - Item Wise' },
-    { id: 'mjPoInHandPanel',     title: 'PO In-hand' }
+    { id: 'mjPoInHandPanel',     title: 'PO In-hand' },
+    { id: 'dbTablePanel',        title: 'Database' }
   ];
 
   targets.forEach(function(t) {
